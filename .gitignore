@@ -4,13 +4,27 @@ node_modules/
 # Build output
 dist/
 
-# Environment files
+# Environment variables (NEVER commit these)
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
+*.env
+
+# Secrets / keys (extra safety net)
+*.key
+*.pem
+*.p12
+*.pfx
+secrets.json
+credentials.json
+serviceAccount*.json
 
 # Editor / OS
 .DS_Store
+.DS_Store?
+Thumbs.db
 .vscode/
 *.suo
 *.ntvs*
@@ -18,5 +32,5 @@ dist/
 *.sln
 *.sw?
 
-# Claude Code local settings
-.claude/settings.local.json
+# Claude Code local settings (contains shell permissions, not keys — but keep private)
+.claude/
