@@ -99,14 +99,14 @@ const C: ColorTheme = {
   borderStrong: '#2a2a3c',
   dangerBorder: '#4a1515',
 
-  textPrimary: '#f0f0f4',
-  textSecondary: '#c0c0cc',
-  textTertiary: '#8e8e9e',
-  textLabel: '#72728a',
-  textSubtle: '#585870',
-  textMuted: '#444458',
-  textFaint: '#343444',
-  textGhost: '#282838',
+  textPrimary: '#ffffff',
+  textSecondary: '#f4f4f8',
+  textTertiary: '#ececf2',
+  textLabel: '#e4e4ec',
+  textSubtle: '#dcdce4',
+  textMuted: '#d0d0dc',
+  textFaint: '#c4c4d2',
+  textGhost: '#b8b8c8',
 
   accent: '#4a8cff',
   accentDim: '#2a5ccc',
@@ -593,8 +593,9 @@ function drawWin98(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, t: 
   ctx.fillText(clockStr, canvas.width - 6 * S, canvas.height - tbH + 14 * S);
 }
 
-function drawWhite(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) {
-  ctx.fillStyle = 'white'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+function drawWhite(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, params?: any) {
+  ctx.fillStyle = params?.color ?? '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -638,6 +639,9 @@ export default function App() {
   // Cube dims
   const cubeDimsRef = useRef({ w: 3.6, h: 3.6, d: 3.6 });
   const faceMeshesRef = useRef<THREE.Mesh[]>([]);
+
+  // Per-face bleed overlay (shows interior light projection patterns from both sides)
+  const bleedFaceRef = useRef<{ canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture; mesh: THREE.Mesh }[]>([]);
 
   // Rig
   const rigGroupRef = useRef<THREE.Group | null>(null);
@@ -687,6 +691,16 @@ export default function App() {
   const [activeLightTab, setActiveLightTab] = useState(0);
   const [chaserActive, setChaserActive] = useState(false);
   const [chaserBpm, setChaserBpm] = useState(120);
+  const [chaserMode, setChaserMode] = useState<'strip' | 'sweep'>('strip');
+  const chaserModeRef = useRef<'strip' | 'sweep'>('strip');
+
+  // Ambient light (configurable, independent from the 4 light strips)
+  const [ambient, setAmbient] = useState({ color: '#8899bb', intensity: 1.0, x: 0, y: 4, z: 0, enabled: true });
+  const [showAmbientPanel, setShowAmbientPanel] = useState(false);
+  const ambientRef = useRef(ambient);
+  useEffect(() => { ambientRef.current = ambient; }, [ambient]);
+  const ambientObjRef = useRef<THREE.PointLight | null>(null);
+  const ambientHelperRef = useRef<THREE.Mesh | null>(null);
   const [syncScene, setSyncScene] = useState<SceneType>('gradient');
   const [lightsAllOff, setLightsAllOff] = useState(false);
   const [showPreviews, setShowPreviews] = useState(true);
@@ -789,6 +803,7 @@ export default function App() {
   useEffect(() => { cameraScaleRef.current = cameraScale; }, [cameraScale]);
   useEffect(() => { chaserActiveRef.current = chaserActive; }, [chaserActive]);
   useEffect(() => { chaserBpmRef.current = chaserBpm; }, [chaserBpm]);
+  useEffect(() => { chaserModeRef.current = chaserMode; }, [chaserMode]);
   useEffect(() => { cubeDimsRef.current = cubeDims; }, [cubeDims]);
   useEffect(() => { offFaceOpacityRef.current = offFaceOpacity; }, [offFaceOpacity]);
   useEffect(() => { lightsAllOffRef.current = lightsAllOff; }, [lightsAllOff]);
@@ -990,6 +1005,27 @@ export default function App() {
       mesh.userData.faceIndex = i;
       scene.add(mesh);
       faceMeshesRef.current.push(mesh);
+
+      // Bleed overlay — paints interior-light projection patterns, visible from both sides
+      const bCanvas = document.createElement('canvas');
+      bCanvas.width = 256; bCanvas.height = 256;
+      const bCtx = bCanvas.getContext('2d')!;
+      const bTex = new THREE.CanvasTexture(bCanvas);
+      bTex.colorSpace = THREE.SRGBColorSpace;
+      const bMat = new THREE.MeshBasicMaterial({
+        map: bTex,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      });
+      const bMesh = new THREE.Mesh(faceGeo, bMat);
+      bMesh.position.copy(def.pos);
+      bMesh.rotation.set(...def.rot);
+      bMesh.renderOrder = 1;
+      scene.add(bMesh);
+      bleedFaceRef.current.push({ canvas: bCanvas, ctx: bCtx, tex: bTex, mesh: bMesh });
     });
 
     // ── Interior Lights ──────────────────────────────────────────────────────
@@ -1034,11 +1070,23 @@ export default function App() {
       void idx;
     });
 
-    // Ambient + hemisphere from above for better environment visibility
-    scene.add(new THREE.AmbientLight(0x303040, 1.8));
-    const hemi = new THREE.HemisphereLight(0x8899bb, 0x223344, 1.0);
-    hemi.position.set(0, 20, 0);
-    scene.add(hemi);
+    // Baseline ambient (low, keeps environment visible even if user kills the ambient light)
+    scene.add(new THREE.AmbientLight(0x202028, 0.5));
+
+    // Configurable ambient light (key fill from above — user controls color/intensity/position)
+    const a0 = ambientRef.current;
+    const ambLight = new THREE.PointLight(a0.color, a0.enabled ? a0.intensity : 0, 40, 1.5);
+    ambLight.position.set(a0.x, a0.y, a0.z);
+    scene.add(ambLight);
+    ambientObjRef.current = ambLight;
+
+    const ambHelper = new THREE.Mesh(
+      new THREE.SphereGeometry(0.12, 12, 12),
+      new THREE.MeshBasicMaterial({ color: a0.color, toneMapped: false })
+    );
+    ambHelper.position.copy(ambLight.position);
+    scene.add(ambHelper);
+    ambientHelperRef.current = ambHelper;
 
     // ── Animation Loop ───────────────────────────────────────────────────────
     const animate = () => {
@@ -1049,7 +1097,7 @@ export default function App() {
       ctrl.autoRotateSpeed = autoOrbitSpeedRef.current; // Direct usage or via ref
       ctrl.update();
 
-      // Scale face meshes to cubeDims
+      // Scale face meshes (and bleed overlays) to cubeDims
       const cd = cubeDimsRef.current;
       faceMeshesRef.current.forEach((mesh, i) => {
         if (i === 0) { // 2_izq (Front, z=+D/2)
@@ -1064,6 +1112,12 @@ export default function App() {
         } else if (i === 3) { // 1_izq_back (Left, x=-W/2)
           mesh.scale.set(cd.d / BASE_CUBE_SIZE, cd.h / BASE_CUBE_SIZE, 1);
           mesh.position.set(-cd.w / 2, 0, 0);
+        }
+        const bleed = bleedFaceRef.current[i];
+        if (bleed) {
+          bleed.mesh.scale.copy(mesh.scale);
+          bleed.mesh.position.copy(mesh.position);
+          bleed.mesh.rotation.copy(mesh.rotation);
         }
       });
 
@@ -1091,10 +1145,27 @@ export default function App() {
         let lr = 0, lg = 0, lb = 0;
 
         if (!lightsAllOffRef.current) {
-          lightsRef.current.forEach(lCfg => {
+          const bpm = chaserBpmRef.current;
+          const beatDuration = 60 / bpm;
+          const nL = Math.max(1, lightsRef.current.length);
+          lightsRef.current.forEach((lCfg, lIdx) => {
             const hz = lCfg.strobeHz ?? 3;
             const strobeOn = !lCfg.strobe || Math.sin(time * hz * Math.PI * 2) > 0;
             if (!strobeOn) return;
+
+            let cMask = 1;
+            if (chaserActiveRef.current) {
+              if (chaserModeRef.current === 'strip') {
+                const activeIdx = Math.floor(time / beatDuration) % nL;
+                cMask = lIdx === activeIdx ? 1 : 0;
+              } else {
+                const phase = (time / beatDuration) % nL;
+                let d = Math.abs(lIdx - phase);
+                d = Math.min(d, nL - d);
+                cMask = Math.exp(-(d * d) / (2 * 0.45 * 0.45));
+              }
+              if (cMask <= 0.001) return;
+            }
 
             const hex = parseInt(lCfg.color.replace('#', ''), 16);
             const cr = ((hex >> 16) & 0xff) / 255;
@@ -1107,6 +1178,7 @@ export default function App() {
 
             // Quadratic attenuation – lights inside a ≈3.6m cube
             let s = (lCfg.intensity * 0.55) / (0.3 + dist * dist * 0.7);
+            s *= cMask;
 
             if (lCfg.type === 'spot') {
               const rx = (lCfg.rotX * Math.PI) / 180;
@@ -1152,7 +1224,7 @@ export default function App() {
         switch (face.scene) {
           case 'gradient': drawGradient(ctx, canvas, time, face.params); break;
           case 'win98': drawWin98(ctx, canvas, time, face.params); break;
-          case 'white': drawWhite(ctx, canvas); break;
+          case 'white': drawWhite(ctx, canvas, face.params); break;
           case 'camera': {
             ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, canvas.width, canvas.height);
             drawGrid(ctx, canvas, 0.05);
@@ -1166,6 +1238,95 @@ export default function App() {
 
         const tex = mat.map as THREE.CanvasTexture | null;
         if (tex) tex.needsUpdate = true;
+
+        // ── Light projection pattern (bleed overlay) ─────────────────────────
+        // Paints per-face radial gradients where each interior light "hits" the
+        // face, so the same projection pattern is visible from outside too.
+        const bleed = bleedFaceRef.current[i];
+        if (bleed) {
+          const bc = bleed.canvas, bctx = bleed.ctx;
+          // Clear to black (additive black = no effect)
+          bctx.fillStyle = '#000';
+          bctx.fillRect(0, 0, bc.width, bc.height);
+
+          if (!lightsAllOffRef.current) {
+            const EXTERIOR_DIM = 0.9; // viewable from outside at ~10% less intensity
+            const bpm = chaserBpmRef.current;
+            const beatDuration = 60 / bpm;
+            const nL = Math.max(1, lightsRef.current.length);
+
+            bctx.globalCompositeOperation = 'lighter';
+            lightsRef.current.forEach((lCfg, lIdx) => {
+              const hz = lCfg.strobeHz ?? 3;
+              const strobeOn = !lCfg.strobe || Math.sin(time * hz * Math.PI * 2) > 0;
+              if (!strobeOn) return;
+
+              let cMask = 1;
+              if (chaserActiveRef.current) {
+                if (chaserModeRef.current === 'strip') {
+                  const activeIdx = Math.floor(time / beatDuration) % nL;
+                  cMask = lIdx === activeIdx ? 1 : 0;
+                } else {
+                  const phase = (time / beatDuration) % nL;
+                  let d = Math.abs(lIdx - phase);
+                  d = Math.min(d, nL - d);
+                  cMask = Math.exp(-(d * d) / (2 * 0.45 * 0.45));
+                }
+                if (cMask <= 0.001) return;
+              }
+
+              // Project light onto this face plane — get UV + normal distance
+              let uvX = 0, uvY = 0, distPlane = 0;
+              if (i === 0) { uvX = (lCfg.x + cd.w / 2) / cd.w; uvY = (cd.h / 2 - lCfg.y) / cd.h; distPlane = cd.d / 2 - lCfg.z; }
+              else if (i === 1) { uvX = 1 - (lCfg.x + cd.w / 2) / cd.w; uvY = (cd.h / 2 - lCfg.y) / cd.h; distPlane = lCfg.z + cd.d / 2; }
+              else if (i === 2) { uvX = (lCfg.z + cd.d / 2) / cd.d; uvY = (cd.h / 2 - lCfg.y) / cd.h; distPlane = cd.w / 2 - lCfg.x; }
+              else if (i === 3) { uvX = 1 - (lCfg.z + cd.d / 2) / cd.d; uvY = (cd.h / 2 - lCfg.y) / cd.h; distPlane = lCfg.x + cd.w / 2; }
+
+              if (distPlane <= 0.01) return; // light on wrong side / at face
+
+              // For spot lights, skip if the cone isn't aiming at this face
+              if (lCfg.type === 'spot') {
+                const rx = (lCfg.rotX * Math.PI) / 180;
+                const rz = ((lCfg.rotZ ?? 0) * Math.PI) / 180;
+                const dx = Math.sin(rz) * Math.cos(rx);
+                const dy = -Math.cos(rx);
+                const dz = Math.cos(rz) * Math.cos(rx);
+                const vx = (i === 2 ? cd.w / 2 : i === 3 ? -cd.w / 2 : 0) - lCfg.x;
+                const vy = 0 - lCfg.y;
+                const vz = (i === 0 ? cd.d / 2 : i === 1 ? -cd.d / 2 : 0) - lCfg.z;
+                const vlen = Math.sqrt(vx * vx + vy * vy + vz * vz) || 1;
+                const dot = (dx * vx + dy * vy + dz * vz) / vlen;
+                if (dot < Math.cos(Math.PI / 6)) return;
+              }
+
+              // Attenuation + intensity
+              const attenuation = 1 / (0.25 + distPlane * distPlane * 0.7);
+              const brightness = Math.min(1.4, lCfg.intensity * 0.55 * cMask * attenuation * EXTERIOR_DIM);
+              if (brightness < 0.015) return;
+
+              const cx = Math.max(-0.3, Math.min(1.3, uvX)) * bc.width;
+              const cy = Math.max(-0.3, Math.min(1.3, uvY)) * bc.height;
+              // Radius grows with distance from face (softer spread further away)
+              const radius = Math.max(35, Math.min(bc.width * 1.2, distPlane * 90 + 45));
+
+              const grad = bctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+              const c = lCfg.color;
+              // Convert hex + brightness → rgba stops
+              const hex = parseInt(c.replace('#', ''), 16);
+              const rr = (hex >> 16) & 0xff;
+              const gg = (hex >> 8) & 0xff;
+              const bb = hex & 0xff;
+              const a0 = Math.min(1, brightness);
+              grad.addColorStop(0, `rgba(${rr},${gg},${bb},${a0})`);
+              grad.addColorStop(0.55, `rgba(${rr},${gg},${bb},${a0 * 0.35})`);
+              grad.addColorStop(1, `rgba(${rr},${gg},${bb},0)`);
+              bctx.fillStyle = grad;
+              bctx.fillRect(0, 0, bc.width, bc.height);
+            });
+            bctx.globalCompositeOperation = 'source-over';
+          }
+          bleed.tex.needsUpdate = true;
+        }
       });
 
       // Update lights
@@ -1190,13 +1351,31 @@ export default function App() {
         const isLed = cfg.type === 'led';
         helperMesh.visible = !isLed && showLightHelpersRef.current;
 
+        // Chaser mask (0..1) per strip — applied consistently to both the
+        // central fill light and the in-strip LED PointLights.
+        let chaserMask = 1;
+        if (chaserActiveRef.current) {
+          const bpm = chaserBpmRef.current;
+          const beatDuration = 60 / bpm;
+          const nL = Math.max(1, lightsRef.current.length);
+          if (chaserModeRef.current === 'strip') {
+            const activeIdx = Math.floor(time / beatDuration) % nL;
+            chaserMask = i === activeIdx ? 1 : 0;
+          } else {
+            // Sweep / barrido: smooth Gaussian wave moves across strips
+            const phase = (time / beatDuration) % nL;
+            let d = Math.abs(i - phase);
+            d = Math.min(d, nL - d);
+            const sigma = 0.45;
+            chaserMask = Math.exp(-(d * d) / (2 * sigma * sigma));
+          }
+        }
+
         // Global blackout override
         if (lightsAllOffRef.current) {
           threeLight.intensity = 0;
         } else if (chaserActiveRef.current) {
-          const beatDuration = 60 / chaserBpmRef.current;
-          const activeIdx = Math.floor(time / beatDuration) % lightsRef.current.length;
-          threeLight.intensity = i === activeIdx ? cfg.intensity : 0;
+          threeLight.intensity = cfg.intensity * chaserMask;
         } else {
           const hz = cfg.strobeHz ?? 3;
           const activeIntensity = cfg.strobe
@@ -1242,31 +1421,67 @@ export default function App() {
           }
         }
 
-        // LED group transform + strobe
+        // LED group transform + strobe + chaser — chaser affects ALL LEDs
+        // in the strip (whole strip on/off for 'strip' mode, soft wave for 'sweep').
         if (lo.ledGroup) {
           const lp = isDraggingThis ? helperMesh.position : new THREE.Vector3(cfg.x, cfg.y, cfg.z);
           lo.ledGroup.position.copy(lp);
           lo.ledGroup.rotation.set((cfg.rotX * Math.PI) / 180, 0, ((cfg.rotZ ?? 0) * Math.PI) / 180);
           lo.ledGroup.visible = showLightHelpersRef.current;
-          const lInt = cfg.strobe ? (Math.sin(time * 18) > 0 ? cfg.intensity * 0.4 : 0) : cfg.intensity * 0.25;
+
+          let lInt: number;
+          let emissiveMult: number;
+          if (lightsAllOffRef.current) {
+            lInt = 0; emissiveMult = 0;
+          } else if (chaserActiveRef.current) {
+            lInt = cfg.intensity * 0.25 * chaserMask;
+            emissiveMult = chaserMask;
+          } else if (cfg.strobe) {
+            const on = Math.sin(time * 18) > 0;
+            lInt = on ? cfg.intensity * 0.4 : 0;
+            emissiveMult = on ? 1 : 0.05;
+          } else {
+            lInt = cfg.intensity * 0.25;
+            emissiveMult = 1;
+          }
+
+          const baseCol = new THREE.Color(cfg.color);
+          const ledCol = baseCol.clone().multiplyScalar(Math.max(0.02, emissiveMult));
           lo.ledGroup.children.forEach(child => {
             if (child instanceof THREE.PointLight) child.intensity = lInt;
             if (child instanceof THREE.Mesh) {
               const m = child.material as THREE.MeshBasicMaterial;
-              if (m.toneMapped === false) m.color.set(cfg.color);
+              if (m.toneMapped === false) m.color.copy(ledCol);
             }
           });
         }
       });
 
-      // Selection ring follows active light
+      // Ambient light update (configurable)
+      const aObj = ambientObjRef.current;
+      const aHelp = ambientHelperRef.current;
+      if (aObj) {
+        const a = ambientRef.current;
+        aObj.color.set(a.color);
+        aObj.intensity = a.enabled && !lightsAllOffRef.current ? a.intensity : 0;
+        aObj.position.set(a.x, a.y, a.z);
+      }
+      if (aHelp) {
+        const a = ambientRef.current;
+        (aHelp.material as THREE.MeshBasicMaterial).color.set(a.color);
+        aHelp.position.set(a.x, a.y, a.z);
+        aHelp.visible = showLightHelpersRef.current && a.enabled;
+      }
+
+      // Selection ring follows active light — billboard toward camera, always visible
       const selRing = selectionRingRef.current;
       if (selRing) {
         const activeLo = lightObjsRef.current[activeLightTabRef.current];
         if (activeLo) {
           selRing.position.copy(activeLo.helperMesh.position);
-          selRing.scale.setScalar(1 + Math.sin(time * 5) * 0.07);
-          selRing.visible = showLightHelpersRef.current;
+          selRing.scale.setScalar(1 + Math.sin(time * 5) * 0.08);
+          selRing.quaternion.copy(cam.quaternion);
+          selRing.visible = true;
         } else {
           selRing.visible = false;
         }
@@ -1279,8 +1494,18 @@ export default function App() {
     // ── TransformControls for light positioning ──────────────────────────────
     const tc = new TransformControls(cam, cvs);
     tc.setMode('translate');
-    tc.setSize(0.75);
-    scene.add(tc as unknown as THREE.Object3D);
+    tc.setSize(1.1);
+    const tcHelper = tc.getHelper();
+    // Render gizmo on top of everything so it's visible through cube faces
+    tcHelper.traverse((obj) => {
+      const m = (obj as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+      if (m) {
+        const mats = Array.isArray(m) ? m : [m];
+        mats.forEach(mm => { mm.depthTest = false; mm.transparent = true; });
+      }
+      (obj as THREE.Mesh).renderOrder = 9999;
+    });
+    scene.add(tcHelper);
     transformControlsRef.current = tc;
 
     tc.addEventListener('dragging-changed', (event: any) => {
@@ -1303,11 +1528,19 @@ export default function App() {
     // Attach TC to first light on init
     if (lightObjsRef.current[0]) tc.attach(lightObjsRef.current[0].helperMesh);
 
-    // Selection ring (shows active light)
+    // Selection ring (shows active light) — torus that always renders on top
     const selRing = new THREE.Mesh(
-      new THREE.SphereGeometry(0.20, 16, 8),
-      new THREE.MeshBasicMaterial({ color: 0x4a8cff, wireframe: true, transparent: true, opacity: 0.7 })
+      new THREE.TorusGeometry(0.32, 0.028, 10, 48),
+      new THREE.MeshBasicMaterial({
+        color: 0x4a8cff,
+        transparent: true,
+        opacity: 0.95,
+        depthTest: false,
+        depthWrite: false,
+        toneMapped: false,
+      })
     );
+    selRing.renderOrder = 9998;
     scene.add(selRing);
     selectionRingRef.current = selRing;
 
@@ -1723,14 +1956,15 @@ export default function App() {
         if (parsed.cubeDims) setCubeDims(parsed.cubeDims);
         if (parsed.rigStyle) setRigStyle(parsed.rigStyle);
         if (parsed.showPeople !== undefined) setShowPeople(parsed.showPeople);
+        if (parsed.ambient) setAmbient(parsed.ambient);
       } catch (e) { console.error('Error loading config', e); }
     }
   }, []);
 
   useEffect(() => {
-    const data = JSON.stringify({ faces, lights, cameraScale, offFaceOpacity, selectedCamId, autoOrbit, autoOrbitSpeed, cubeDims, rigStyle, showPeople });
+    const data = JSON.stringify({ faces, lights, cameraScale, offFaceOpacity, selectedCamId, autoOrbit, autoOrbitSpeed, cubeDims, rigStyle, showPeople, ambient });
     localStorage.setItem('stage_viz_config', data);
-  }, [faces, lights, cameraScale, offFaceOpacity, selectedCamId, autoOrbit, autoOrbitSpeed, cubeDims, rigStyle, showPeople]);
+  }, [faces, lights, cameraScale, offFaceOpacity, selectedCamId, autoOrbit, autoOrbitSpeed, cubeDims, rigStyle, showPeople, ambient]);
 
   useEffect(() => {
     if (selectedCamId && !cameraActive) {
@@ -1760,7 +1994,7 @@ export default function App() {
           >⌂ RESET CAM</button>
           <button
             style={autoOrbit
-              ? { background: C.textPrimary, color: C.accentText, border: `2px solid ${C.textPrimary}`, padding: '6px 14px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer', fontWeight: 500 }
+              ? { background: 'transparent', color: C.white, border: `2px solid ${C.white}`, padding: '6px 14px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer', fontWeight: 500 }
               : { background: 'transparent', color: C.textPrimary, border: `2px solid ${C.borderStrong}`, padding: '6px 14px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer' }
             }
             onClick={() => setAutoOrbit(v => !v)}
@@ -1926,6 +2160,56 @@ export default function App() {
         {/* ── RIGHT: Controles (320px) ── */}
         <div style={{ width: 320, borderLeft: `1px solid ${C.border}`, overflowY: 'auto', flexShrink: 0 }} onPointerDown={e => e.stopPropagation()}>
 
+          {/* AMBIENTE */}
+          <div style={{ borderBottom: `1px solid ${C.border}` }}>
+            <button
+              style={{ width: '100%', padding: '14px 16px', background: 'transparent', border: 'none', color: showAmbientPanel ? C.textPrimary : C.textMuted, fontFamily: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between' }}
+              onClick={() => setShowAmbientPanel(v => !v)}
+            >
+              <span>☀ LUZ AMBIENTE</span>
+              <span>{showAmbientPanel ? '▼' : '▶'}</span>
+            </button>
+            {showAmbientPanel && (
+              <div style={{ padding: '0 16px 16px' }}>
+                <div style={{ marginBottom: 12 }}>
+                  <button
+                    style={ambient.enabled
+                      ? { width: '100%', background: 'transparent', color: C.white, border: `2px solid ${C.white}`, padding: '7px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 600 }
+                      : { width: '100%', background: 'transparent', color: C.textMuted, border: `2px solid ${C.borderStrong}`, padding: '7px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }
+                    }
+                    onClick={() => setAmbient(a => ({ ...a, enabled: !a.enabled }))}
+                  >{ambient.enabled ? '⚡ AMBIENTE ON' : '◯ AMBIENTE OFF'}</button>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                  <input type="color" value={ambient.color}
+                    onChange={e => setAmbient(a => ({ ...a, color: e.target.value }))}
+                    style={{ width: 40, height: 32, cursor: 'pointer', border: `2px solid ${C.borderStrong}`, background: 'transparent' }} />
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 4 }}>Intensidad</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input type="range" min={0} max={10} step={0.1} value={ambient.intensity}
+                        onChange={e => setAmbient(a => ({ ...a, intensity: +e.target.value }))} style={{ flex: 1 }} />
+                      <input type="number" min={0} max={10} step={0.1} value={ambient.intensity}
+                        onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setAmbient(a => ({ ...a, intensity: Math.max(0, Math.min(10, v)) })); }}
+                        style={{ width: 52, fontSize: 9, background: C.bgInput, border: `2px solid ${C.borderStrong}`, color: C.accent, fontFamily: 'monospace', padding: '3px 4px' }} />
+                    </div>
+                  </div>
+                </div>
+                <p style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>Posición XYZ</p>
+                {(['x', 'y', 'z'] as const).map(ax => (
+                  <div key={ax} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <span style={{ fontSize: 11, fontWeight: 500, minWidth: 12, color: ax === 'x' ? '#f66' : ax === 'y' ? '#6f6' : '#66f' }}>{ax.toUpperCase()}</span>
+                    <input type="range" min={-8} max={8} step={0.1} value={ambient[ax]}
+                      onChange={e => setAmbient(a => ({ ...a, [ax]: +e.target.value }))} style={{ flex: 1 }} />
+                    <input type="number" min={-8} max={8} step={0.1} value={ambient[ax]}
+                      onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setAmbient(a => ({ ...a, [ax]: Math.max(-8, Math.min(8, v)) })); }}
+                      style={{ width: 52, fontSize: 9, background: C.bgInput, border: `2px solid ${C.borderStrong}`, color: C.accent, fontFamily: 'monospace', padding: '3px 4px' }} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* LUCES */}
           <div style={{ borderBottom: `1px solid ${C.border}` }}>
             <button
@@ -1995,14 +2279,32 @@ export default function App() {
                   >{showLightHelpers ? '👁️ OCULTAR LUCES 3D' : '👁️ MOSTRAR LUCES 3D'}</button>
                 </div>
                 {chaserActive && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                    <span style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', minWidth: 32 }}>BPM</span>
-                    <input type="range" min={30} max={300} step={1} value={chaserBpm}
-                      onChange={e => setChaserBpm(+e.target.value)} style={{ flex: 1 }} />
-                    <input type="number" min={30} max={300} value={chaserBpm}
-                      onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setChaserBpm(Math.max(30, Math.min(300, v))); }}
-                      style={{ width: 48, fontSize: 9, background: C.bgInput, border: `2px solid ${C.borderStrong}`, color: C.accent, fontFamily: 'monospace', padding: '4px' }} />
-                  </div>
+                  <>
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                      <button
+                        style={chaserMode === 'strip'
+                          ? { flex: 1, background: 'transparent', color: C.white, border: `2px solid ${C.white}`, padding: '6px', fontFamily: 'inherit', fontSize: 9, cursor: 'pointer', fontWeight: 500 }
+                          : { flex: 1, background: 'transparent', color: C.textMuted, border: `2px solid ${C.borderStrong}`, padding: '6px', fontFamily: 'inherit', fontSize: 9, cursor: 'pointer' }
+                        }
+                        onClick={() => setChaserMode('strip')}
+                      >▦ TIRAS ON/OFF</button>
+                      <button
+                        style={chaserMode === 'sweep'
+                          ? { flex: 1, background: 'transparent', color: C.white, border: `2px solid ${C.white}`, padding: '6px', fontFamily: 'inherit', fontSize: 9, cursor: 'pointer', fontWeight: 500 }
+                          : { flex: 1, background: 'transparent', color: C.textMuted, border: `2px solid ${C.borderStrong}`, padding: '6px', fontFamily: 'inherit', fontSize: 9, cursor: 'pointer' }
+                        }
+                        onClick={() => setChaserMode('sweep')}
+                      >〰 BARRIDO</button>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                      <span style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', minWidth: 32 }}>BPM</span>
+                      <input type="range" min={30} max={300} step={1} value={chaserBpm}
+                        onChange={e => setChaserBpm(+e.target.value)} style={{ flex: 1 }} />
+                      <input type="number" min={30} max={300} value={chaserBpm}
+                        onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setChaserBpm(Math.max(30, Math.min(300, v))); }}
+                        style={{ width: 48, fontSize: 9, background: C.bgInput, border: `2px solid ${C.borderStrong}`, color: C.accent, fontFamily: 'monospace', padding: '4px' }} />
+                    </div>
+                  </>
                 )}
 
                 {/* Light tabs */}
@@ -2035,7 +2337,7 @@ export default function App() {
                         {(['point', 'spot', 'led'] as LightType[]).map(t => (
                           <button key={t}
                             style={l.type === t
-                              ? { flex: 1, fontSize: 9, padding: '8px 4px', background: C.textPrimary, color: C.accentText, border: `2px solid ${C.textPrimary}`, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }
+                              ? { flex: 1, fontSize: 9, padding: '8px 4px', background: 'transparent', color: C.white, border: `2px solid ${C.white}`, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }
                               : { flex: 1, fontSize: 9, padding: '8px 4px', background: 'transparent', color: C.textMuted, border: `2px solid ${C.borderStrong}`, cursor: 'pointer', fontFamily: 'inherit' }
                             }
                             onClick={() => switchLightType(i, t)}>
@@ -2127,21 +2429,21 @@ export default function App() {
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button
                       style={rigStyle === 'pipe'
-                        ? { flex: 1, background: C.textPrimary, color: C.accentText, border: `2px solid ${C.textPrimary}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }
+                        ? { flex: 1, background: 'transparent', color: C.white, border: `2px solid ${C.white}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }
                         : { flex: 1, background: 'transparent', color: C.textMuted, border: `2px solid ${C.borderStrong}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }
                       }
                       onClick={() => setRigStyle('pipe')}
                     >⬜ PIPE</button>
                     <button
                       style={rigStyle === 'truss'
-                        ? { flex: 1, background: C.textPrimary, color: C.accentText, border: `2px solid ${C.textPrimary}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }
+                        ? { flex: 1, background: 'transparent', color: C.white, border: `2px solid ${C.white}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }
                         : { flex: 1, background: 'transparent', color: C.textMuted, border: `2px solid ${C.borderStrong}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }
                       }
                       onClick={() => setRigStyle('truss')}
                     >▦ TRUSS</button>
                     <button
                       style={rigStyle === 'columns'
-                        ? { flex: 1, background: C.textPrimary, color: C.accentText, border: `2px solid ${C.textPrimary}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }
+                        ? { flex: 1, background: 'transparent', color: C.white, border: `2px solid ${C.white}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }
                         : { flex: 1, background: 'transparent', color: C.textMuted, border: `2px solid ${C.borderStrong}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }
                       }
                       onClick={() => setRigStyle('columns')}
