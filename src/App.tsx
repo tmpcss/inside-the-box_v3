@@ -35,6 +35,7 @@ interface LightConfig {
   z: number;
   rotX: number; // degrees
   rotY: number; // degrees
+  rotZ?: number; // degrees
   ledCount?: number;
 }
 
@@ -59,6 +60,60 @@ const SCENE_OPTIONS: { value: SceneType; label: string }[] = [
   { value: 'win98', label: '🖥️ Win98 Glitch' },
   { value: 'white', label: '⬜ Blanco' },
 ];
+
+// ─── UI color theme ──────────────────────────────────────────────────────────
+interface ColorTheme {
+  bgMain: string;
+  bgPanel: string;
+  bgCard: string;
+  bgInput: string;
+  bgOverlay: string;
+  border: string;
+  borderStrong: string;
+  dangerBorder: string;
+  textPrimary: string;
+  textSecondary: string;
+  textTertiary: string;
+  textLabel: string;
+  textSubtle: string;
+  textMuted: string;
+  textFaint: string;
+  textGhost: string;
+  accent: string;
+  accentDim: string;
+  accentText: string;
+  white: string;
+  variantAccent: string;
+  danger: string;
+}
+
+const C: ColorTheme = {
+  bgMain: '#0a0a0e',
+  bgPanel: '#0e0e14',
+  bgCard: '#131320',
+  bgInput: '#0a0a0e',
+  bgOverlay: '#0e0e14f2',
+
+  border: '#1c1c2a',
+  borderStrong: '#2a2a3c',
+  dangerBorder: '#4a1515',
+
+  textPrimary: '#f0f0f4',
+  textSecondary: '#c0c0cc',
+  textTertiary: '#8e8e9e',
+  textLabel: '#72728a',
+  textSubtle: '#585870',
+  textMuted: '#444458',
+  textFaint: '#343444',
+  textGhost: '#282838',
+
+  accent: '#4a8cff',
+  accentDim: '#2a5ccc',
+  accentText: '#ffffff',
+  white: '#ffffff',
+  variantAccent: '#4a8cff',
+  danger: '#ff5555',
+};
 
 // ─── Standalone rig builder helpers ──────────────────────────────────────────
 function buildPipeRig(group: THREE.Group, HW: number, HH: number, HD: number, FY: number) {
@@ -180,6 +235,97 @@ function makeTrussSegment(
       }
     }
   }
+}
+
+function buildColumnsRig(group: THREE.Group, HW: number, HH: number, HD: number, _FY: number) {
+  const plateMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9, roughness: 0.3 });
+  const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+
+  // 4 vertical truss towers — one at each corner
+  const corners: [number, number][] = [[-HW, -HD], [HW, -HD], [HW, HD], [-HW, HD]];
+  corners.forEach(([cx, cz]) => {
+    makeTrussSegment(group, V(cx, -HH, cz), V(cx, HH, cz), 0.07, 0x111111);
+
+    // Base plate
+    const bp = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.025, 0.30), plateMat);
+    bp.position.set(cx, -HH - 0.013, cz);
+    group.add(bp);
+
+    // Top plate
+    const tp = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.020, 0.26), plateMat);
+    tp.position.set(cx, HH + 0.010, cz);
+    group.add(tp);
+  });
+}
+
+// ─── Realistic human figure ───────────────────────────────────────────────────
+function buildHumanFigure(parentGroup: THREE.Group, posX: number, posY: number, posZ: number, rotY: number) {
+  const figGroup = new THREE.Group();
+  figGroup.position.set(posX, posY, posZ);
+  figGroup.rotation.y = rotY;
+  parentGroup.add(figGroup);
+
+  const mat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.1, roughness: 0.9 });
+
+  const addCyl = (ax: number, ay: number, az: number, bx: number, by: number, bz: number, r: number) => {
+    const a = new THREE.Vector3(ax, ay, az);
+    const b = new THREE.Vector3(bx, by, bz);
+    const dir = b.clone().sub(a);
+    const len = dir.length();
+    if (len < 0.001) return;
+    const geo = new THREE.CylinderGeometry(r, r, len, 7);
+    const m = new THREE.Mesh(geo, mat);
+    m.position.copy(a.clone().add(b).multiplyScalar(0.5));
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+    figGroup.add(m);
+  };
+
+  // Proportions: 1.75m total, feet at y=0
+  // Head (sphere Ø24cm)
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 12), mat);
+  head.position.set(0, 1.63, 0);
+  figGroup.add(head);
+
+  // Neck
+  addCyl(0, 1.49, 0, 0, 1.51, 0, 0.045);
+
+  // Torso: shoulders y=1.47 → hips y=0.94
+  addCyl(0, 0.94, 0, 0, 1.47, 0, 0.10);
+
+  // Arms (upper arm + forearm, slight natural splay)
+  for (const s of [-1, 1] as const) {
+    // Upper arm: shoulder → elbow
+    addCyl(s * 0.19, 1.41, 0, s * 0.33, 1.13, 0, 0.040);
+    // Forearm: elbow → wrist/hand
+    addCyl(s * 0.33, 1.13, 0, s * 0.30, 0.87, 0, 0.032);
+  }
+
+  // Pelvis sphere
+  const pelvis = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), mat);
+  pelvis.position.set(0, 0.94, 0);
+  figGroup.add(pelvis);
+
+  // Legs (upper leg + lower leg + foot)
+  for (const s of [-1, 1] as const) {
+    // Upper leg: hip → knee
+    addCyl(s * 0.09, 0.92, 0, s * 0.10, 0.50, 0, 0.058);
+    // Lower leg: knee → ankle
+    addCyl(s * 0.10, 0.50, 0, s * 0.10, 0.07, 0, 0.048);
+    // Foot
+    addCyl(s * 0.10, 0.07, -0.02, s * 0.10, 0.04, 0.15, 0.035);
+  }
+}
+
+function buildAllHumanFigures(group: THREE.Group, HW: number, HH: number, HD: number) {
+  const floorY = -HH - 0.12; // standing on the floor frame
+
+  // 2 inside (facing each other)
+  buildHumanFigure(group, -0.35, floorY, 0, 0);
+  buildHumanFigure(group, 0.35, floorY, 0, Math.PI);
+
+  // 2 outside (facing the cube)
+  buildHumanFigure(group, 0, floorY, HD + 2.0, Math.PI);
+  buildHumanFigure(group, HW + 2.0, floorY, 0, -Math.PI / 2);
 }
 
 function buildTrussRig(group: THREE.Group, HW: number, HH: number, HD: number, FY: number) {
@@ -462,6 +608,7 @@ export default function App() {
 
   // Rig
   const rigGroupRef = useRef<THREE.Group | null>(null);
+  const peopleGroupRef = useRef<THREE.Group | null>(null);
 
   // Lights
   const lightObjsRef = useRef<LightObjects[]>([]);
@@ -493,7 +640,9 @@ export default function App() {
   const [showEstructuraPanel, setShowEstructuraPanel] = useState(false);
   const [showResolucionPanel, setShowResolucionPanel] = useState(false);
   const [cubeDims, setCubeDims] = useState({ w: 3.6, h: 3.6, d: 3.6 });
-  const [rigStyle, setRigStyle] = useState<'pipe' | 'truss'>('truss');
+  const [rigStyle, setRigStyle] = useState<'pipe' | 'truss' | 'columns'>('truss');
+  const [showPeople, setShowPeople] = useState(false);
+
   const [activeLightTab, setActiveLightTab] = useState(0);
   const [chaserActive, setChaserActive] = useState(false);
   const [chaserBpm, setChaserBpm] = useState(120);
@@ -531,10 +680,10 @@ export default function App() {
   });
 
   const [lights, setLights] = useState<LightConfig[]>([
-    { id: 0, name: 'Light A', color: '#ff0066', intensity: 2, strobe: false, strobeHz: 3, type: 'spot', x: -0.5, y: 0.3, z: 0.5, rotX: -20, rotY: 180, ledCount: 12 },
-    { id: 1, name: 'Light B', color: '#00ff85', intensity: 2, strobe: false, strobeHz: 3, type: 'spot', x: 0.5, y: 0.3, z: 0.5, rotX: -20, rotY: 90, ledCount: 12 },
-    { id: 2, name: 'Light C', color: '#0066ff', intensity: 2, strobe: false, strobeHz: 3, type: 'spot', x: 0.5, y: 0.3, z: -0.5, rotX: -20, rotY: 0, ledCount: 12 },
-    { id: 3, name: 'Light D', color: '#ffffff', intensity: 1.5, strobe: false, strobeHz: 3, type: 'spot', x: -0.5, y: 0.3, z: -0.5, rotX: -20, rotY: 270, ledCount: 12 },
+    { id: 0, name: 'Light A', color: C.variantAccent, intensity: 2, strobe: false, strobeHz: 3, type: 'spot', x: -0.5, y: 0.3, z: 0.5, rotX: -20, rotY: 180, rotZ: 0, ledCount: 12 },
+    { id: 1, name: 'Light B', color: '#00ff85', intensity: 2, strobe: false, strobeHz: 3, type: 'spot', x: 0.5, y: 0.3, z: 0.5, rotX: -20, rotY: 90, rotZ: 0, ledCount: 12 },
+    { id: 2, name: 'Light C', color: '#0066ff', intensity: 2, strobe: false, strobeHz: 3, type: 'spot', x: 0.5, y: 0.3, z: -0.5, rotX: -20, rotY: 0, rotZ: 0, ledCount: 12 },
+    { id: 3, name: 'Light D', color: '#ffffff', intensity: 1.5, strobe: false, strobeHz: 3, type: 'spot', x: -0.5, y: 0.3, z: -0.5, rotX: -20, rotY: 270, rotZ: 0, ledCount: 12 },
   ]);
 
   // Keep refs in sync
@@ -621,7 +770,7 @@ export default function App() {
         const ctx = mp.getContext('2d');
         if (ctx) {
           const cw = mp.width, ch = mp.height;
-          ctx.fillStyle = '#0a0a0a';
+          ctx.fillStyle = C.bgInput;
           ctx.fillRect(0, 0, cw, ch);
           facesRef.current.forEach((face, i) => {
             const { x, y, w, h } = face.mapping;
@@ -905,10 +1054,10 @@ export default function App() {
 
             if (lCfg.type === 'spot') {
               const rx = (lCfg.rotX * Math.PI) / 180;
-              const ry = (lCfg.rotY * Math.PI) / 180;
-              const dx = Math.sin(ry) * Math.cos(rx);
+              const rz = ((lCfg.rotZ ?? 0) * Math.PI) / 180;
+              const dx = Math.sin(rz) * Math.cos(rx);
               const dy = -Math.cos(rx);
-              const dz = Math.cos(ry) * Math.cos(rx);
+              const dz = Math.cos(rz) * Math.cos(rx);
               const dot = dx * vnx + dy * vny + dz * vnz;
               if (dot < COS_SPOT) return;
               s *= (dot - COS_SPOT) / (1 - COS_SPOT);
@@ -993,10 +1142,10 @@ export default function App() {
         // Spotlight direction + cone helper
         if (threeLight instanceof THREE.SpotLight) {
           const rx = (cfg.rotX * Math.PI) / 180;
-          const ry = (cfg.rotY * Math.PI) / 180;
-          const dx = Math.sin(ry) * Math.cos(rx);
+          const rz = ((cfg.rotZ ?? 0) * Math.PI) / 180;
+          const dx = Math.sin(rz) * Math.cos(rx);
           const dy = Math.cos(rx) * -1;
-          const dz = Math.cos(ry) * Math.cos(rx);
+          const dz = Math.cos(rz) * Math.cos(rx);
           threeLight.target.position.set(cfg.x + dx * 3, cfg.y + dy * 3, cfg.z + dz * 3);
           threeLight.target.updateMatrixWorld();
 
@@ -1023,7 +1172,7 @@ export default function App() {
         // LED group transform + strobe
         if (lo.ledGroup) {
           lo.ledGroup.position.set(cfg.x, cfg.y, cfg.z);
-          lo.ledGroup.rotation.set((cfg.rotX * Math.PI) / 180, (cfg.rotY * Math.PI) / 180, 0);
+          lo.ledGroup.rotation.set((cfg.rotX * Math.PI) / 180, 0, ((cfg.rotZ ?? 0) * Math.PI) / 180);
           const lInt = cfg.strobe ? (Math.sin(time * 18) > 0 ? cfg.intensity * 0.4 : 0) : cfg.intensity * 0.25;
           lo.ledGroup.children.forEach(child => {
             if (child instanceof THREE.PointLight) child.intensity = lInt;
@@ -1127,12 +1276,31 @@ export default function App() {
 
     if (rigStyle === 'pipe') {
       buildPipeRig(group, HW, HH, HD, FY);
+    } else if (rigStyle === 'columns') {
+      buildColumnsRig(group, HW, HH, HD, FY);
     } else {
       buildTrussRig(group, HW, HH, HD, FY);
     }
     scene.add(group);
     rigGroupRef.current = group;
   }, [cubeDims, rigStyle]); // eslint-disable-line
+
+  // ─── People group rebuild ─────────────────────────────────────────────────
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    if (peopleGroupRef.current) {
+      scene.remove(peopleGroupRef.current);
+      peopleGroupRef.current = null;
+    }
+    if (!showPeople) return;
+    const group = new THREE.Group();
+    const cd = cubeDims;
+    const HW = (cd.w / 2) - 0.15, HH = (cd.h / 2) - 0.15, HD = (cd.d / 2) - 0.15;
+    buildAllHumanFigures(group, HW, HH, HD);
+    scene.add(group);
+    peopleGroupRef.current = group;
+  }, [cubeDims, showPeople]); // eslint-disable-line
 
   // ─── Update face materials when scene/camera changes ─────────────────────
   useEffect(() => {
@@ -1481,14 +1649,15 @@ export default function App() {
         if (parsed.autoOrbitSpeed !== undefined) setAutoOrbitSpeed(parsed.autoOrbitSpeed);
         if (parsed.cubeDims) setCubeDims(parsed.cubeDims);
         if (parsed.rigStyle) setRigStyle(parsed.rigStyle);
+        if (parsed.showPeople !== undefined) setShowPeople(parsed.showPeople);
       } catch (e) { console.error('Error loading config', e); }
     }
   }, []);
 
   useEffect(() => {
-    const data = JSON.stringify({ faces, lights, cameraScale, offFaceOpacity, selectedCamId, autoOrbit, autoOrbitSpeed, cubeDims, rigStyle });
+    const data = JSON.stringify({ faces, lights, cameraScale, offFaceOpacity, selectedCamId, autoOrbit, autoOrbitSpeed, cubeDims, rigStyle, showPeople });
     localStorage.setItem('stage_viz_config', data);
-  }, [faces, lights, cameraScale, offFaceOpacity, selectedCamId, autoOrbit, autoOrbitSpeed, cubeDims, rigStyle]);
+  }, [faces, lights, cameraScale, offFaceOpacity, selectedCamId, autoOrbit, autoOrbitSpeed, cubeDims, rigStyle, showPeople]);
 
   useEffect(() => {
     if (selectedCamId && !cameraActive) {
@@ -1504,35 +1673,35 @@ export default function App() {
 
   // ─── JSX ──────────────────────────────────────────────────────────────────
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: '#0a0a0a', overflow: 'hidden', fontFamily: "'Courier New', monospace", color: '#f5f5f5' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: C.bgInput, overflow: 'hidden', fontFamily: "'Courier New', monospace", color: C.textPrimary }}>
       {/* ── HEADER ── */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', height: 52, borderBottom: '1px solid #222', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', height: 52, borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
         <div>
-          <h1 style={{ fontSize: 16, fontWeight: 500, letterSpacing: '0.2em', color: '#00FF85' }}>INSIDE THE BOX</h1>
-          <p style={{ fontSize: 9, color: '#444', letterSpacing: '0.1em' }}>By toni y tomi</p>
+          <h1 style={{ fontSize: 16, fontWeight: 500, letterSpacing: '0.2em', color: C.accent }}>INSIDE THE BOX</h1>
+          <p style={{ fontSize: 9, color: C.textGhost, letterSpacing: '0.1em' }}>By tomix_x</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button
-            style={{ background: 'transparent', color: '#f5f5f5', border: '2px solid #333', padding: '6px 14px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer' }}
+            style={{ background: 'transparent', color: C.textPrimary, border: `2px solid ${C.borderStrong}`, padding: '6px 14px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer' }}
             onClick={resetCamera}
           >⌂ RESET CAM</button>
           <button
             style={autoOrbit
-              ? { background: '#f5f5f5', color: '#000', border: '2px solid #f5f5f5', padding: '6px 14px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer', fontWeight: 500 }
-              : { background: 'transparent', color: '#f5f5f5', border: '2px solid #333', padding: '6px 14px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer' }
+              ? { background: C.textPrimary, color: C.accentText, border: `2px solid ${C.textPrimary}`, padding: '6px 14px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer', fontWeight: 500 }
+              : { background: 'transparent', color: C.textPrimary, border: `2px solid ${C.borderStrong}`, padding: '6px 14px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer' }
             }
             onClick={() => setAutoOrbit(v => !v)}
           >⟳ AUTO ORBIT</button>
           {autoOrbit && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 10, color: '#999', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Speed</span>
+              <span style={{ fontSize: 10, color: C.textLabel, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Speed</span>
               <input type="range" min={-20} max={20} step={0.1} value={autoOrbitSpeed}
                 onChange={e => setAutoOrbitSpeed(+e.target.value)} style={{ width: 80 }} />
-              <span style={{ fontSize: 10, color: '#ccc', fontFamily: 'monospace' }}>{autoOrbitSpeed.toFixed(1)}x</span>
+              <span style={{ fontSize: 10, color: C.textSecondary, fontFamily: 'monospace' }}>{autoOrbitSpeed.toFixed(1)}x</span>
             </div>
           )}
           <button
-            style={{ background: 'transparent', color: '#00FF85', border: '2px solid #00FF85', padding: '6px 14px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer' }}
+            style={{ background: 'transparent', color: C.accent, border: `2px solid ${C.accent}`, padding: '6px 14px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer' }}
             onClick={() => setShowMappingUI(true)}
           >⚙ MAPEO</button>
         </div>
@@ -1542,11 +1711,11 @@ export default function App() {
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
 
         {/* ── LEFT SIDEBAR (Escenas + Cámara) ── */}
-        <div style={{ width: 300, borderRight: '1px solid #222', overflowY: 'auto', flexShrink: 0 }} onPointerDown={e => e.stopPropagation()}>
+        <div style={{ width: 300, borderRight: `1px solid ${C.border}`, overflowY: 'auto', flexShrink: 0 }} onPointerDown={e => e.stopPropagation()}>
           {/* PANEL: Cámara Virtual */}
-          <div style={{ borderBottom: '1px solid #222' }}>
+          <div style={{ borderBottom: `1px solid ${C.border}` }}>
             <button
-              style={{ width: '100%', padding: '14px 16px', background: 'transparent', border: 'none', color: showCameraSection ? '#f5f5f5' : '#666', fontFamily: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between' }}
+              style={{ width: '100%', padding: '14px 16px', background: 'transparent', border: 'none', color: showCameraSection ? C.textPrimary : C.textMuted, fontFamily: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between' }}
               onClick={() => setShowCameraSection(v => !v)}
             >
               <span>📹 CÁMARA VIRTUAL</span>
@@ -1555,7 +1724,7 @@ export default function App() {
             {showCameraSection && (
               <div style={{ padding: '0 16px 16px' }}>
                 <select
-                  style={{ width: '100%', fontSize: 10, padding: '6px 8px', background: '#111', color: '#ccc', border: '2px solid #333', fontFamily: 'inherit', marginBottom: 8 }}
+                  style={{ width: '100%', fontSize: 10, padding: '6px 8px', background: C.bgPanel, color: C.textSecondary, border: `2px solid ${C.borderStrong}`, fontFamily: 'inherit', marginBottom: 8 }}
                   value={selectedCamId}
                   onChange={e => setSelectedCamId(e.target.value)}
                 >
@@ -1565,15 +1734,12 @@ export default function App() {
                   ))}
                 </select>
                 <button
-                  style={cameraActive
-                    ? { width: '100%', background: '#f5f5f5', color: '#000', border: '2px solid #f5f5f5', padding: '8px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer', fontWeight: 500, marginBottom: 12 }
-                    : { width: '100%', background: 'transparent', color: '#f5f5f5', border: '2px solid #333', padding: '8px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer', marginBottom: 12 }
-                  }
+                  style={{ width: '100%', background: 'transparent', color: C.textPrimary, border: `2px solid ${cameraActive ? C.accent : C.borderStrong}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer', marginBottom: 12 }}
                   onClick={cameraActive ? stopCamera : startCamera}
-                >{cameraActive ? '⏹ DETENER CÁMARA' : '▶ INICIAR CÁMARA'}</button>
-                <div style={{ border: '2px dashed #333', padding: '16px', textAlign: 'center', cursor: 'pointer', position: 'relative' }}>
-                  <p style={{ fontSize: 10, color: '#666', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>📁 CARGAR ARCHIVO</p>
-                  <p style={{ fontSize: 9, color: '#444' }}>Video (.mp4) o Imagen (.png)</p>
+                >{cameraActive && <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#fff', marginRight: 6, animation: 'blink 1s infinite' }} />}{cameraActive ? 'DETENER CÁMARA' : '▶ INICIAR CÁMARA'}</button>
+                <div style={{ border: `2px dashed ${C.borderStrong}`, padding: '16px', textAlign: 'center', cursor: 'pointer', position: 'relative' }}>
+                  <p style={{ fontSize: 10, color: C.textMuted, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>📁 CARGAR ARCHIVO</p>
+                  <p style={{ fontSize: 9, color: C.textGhost }}>Video (.mp4) o Imagen (.png)</p>
                   <input type="file" accept="video/*,image/*"
                     style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
                     onChange={e => { const file = e.target.files?.[0]; if (file) handleFileInput(file); }}
@@ -1581,8 +1747,8 @@ export default function App() {
                 </div>
                 {cameraActive && (
                   <div style={{ marginTop: 8, padding: '8px', border: '1px solid #1a3a1a', textAlign: 'center' }}>
-                    <p style={{ fontSize: 10, color: '#00FF85' }}>● CÁMARA ACTIVA</p>
-                    <p style={{ fontSize: 9, color: '#555', marginTop: 4 }}>{cameraResolution.w}×{cameraResolution.h}</p>
+                    <p style={{ fontSize: 10, color: C.accent }}>● CÁMARA ACTIVA</p>
+                    <p style={{ fontSize: 9, color: C.textFaint, marginTop: 4 }}>{cameraResolution.w}×{cameraResolution.h}</p>
                   </div>
                 )}
               </div>
@@ -1590,9 +1756,9 @@ export default function App() {
           </div>
 
           {/* PANEL: Escenas */}
-          <div style={{ borderBottom: '1px solid #222' }}>
+          <div style={{ borderBottom: `1px solid ${C.border}` }}>
             <button
-              style={{ width: '100%', padding: '14px 16px', background: 'transparent', border: 'none', color: showFacePanel ? '#f5f5f5' : '#666', fontFamily: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between' }}
+              style={{ width: '100%', padding: '14px 16px', background: 'transparent', border: 'none', color: showFacePanel ? C.textPrimary : C.textMuted, fontFamily: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between' }}
               onClick={() => setShowFacePanel(v => !v)}
             >
               <span>ESCENAS</span>
@@ -1601,64 +1767,71 @@ export default function App() {
             {showFacePanel && (
               <div style={{ padding: '0 16px 16px' }}>
                 {/* Master Projection */}
-                <div style={{ marginBottom: 20, paddingBottom: 20, borderBottom: '1px solid #222' }}>
+                <div style={{ marginBottom: 20, paddingBottom: 20, borderBottom: `1px solid ${C.border}` }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Master Projection</span>
-                    <span style={{ fontSize: 11, color: '#ccc', fontFamily: 'monospace' }}>{(offFaceOpacity * 100).toFixed(0)}%</span>
+                    <span style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Master Projection</span>
+                    <span style={{ fontSize: 11, color: C.textSecondary, fontFamily: 'monospace' }}>{(offFaceOpacity * 100).toFixed(0)}%</span>
                   </div>
                   <input type="range" min="0" max="1" step="0.01" value={offFaceOpacity}
                     onChange={e => setOffFaceOpacity(parseFloat(e.target.value))} style={{ width: '100%' }} />
                 </div>
                 {/* Sync */}
-                <div style={{ marginBottom: 20, paddingBottom: 20, borderBottom: '1px solid #222' }}>
-                  <label style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 8 }}>Sync a todas</label>
+                <div style={{ marginBottom: 20, paddingBottom: 20, borderBottom: `1px solid ${C.border}` }}>
+                  <label style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 8 }}>Sync a todas</label>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <select
-                      style={{ flex: 1, fontSize: 10, padding: '6px', background: '#111', color: '#ccc', border: '2px solid #333', fontFamily: 'inherit' }}
+                      style={{ flex: 1, fontSize: 10, padding: '6px', background: C.bgPanel, color: C.textSecondary, border: `2px solid ${C.borderStrong}`, fontFamily: 'inherit' }}
                       value={syncScene} onChange={e => setSyncScene(e.target.value as SceneType)}
                     >
                       {SCENE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                     <button
-                      style={{ background: '#00FF85', color: '#000', border: '2px solid #00FF85', padding: '6px 12px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer', fontWeight: 500, whiteSpace: 'nowrap' }}
+                      style={{ background: C.accent, color: C.accentText, border: `2px solid ${C.accent}`, padding: '6px 12px', fontFamily: 'inherit', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer', fontWeight: 500, whiteSpace: 'nowrap' }}
                       onClick={() => setFaces(prev => prev.map(f => ({ ...f, scene: syncScene })))}
                     >▶ SYNC</button>
                   </div>
                 </div>
                 {/* Previews toggle */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <span style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Previews</span>
+                  <span style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Previews</span>
                   <button
-                    style={{ fontSize: 9, padding: '4px 10px', border: `2px solid ${showPreviews ? '#00FF85' : '#333'}`, color: showPreviews ? '#00FF85' : '#555', background: 'transparent', fontFamily: 'inherit', cursor: 'pointer' }}
+                    style={{ fontSize: 9, padding: '4px 10px', border: `2px solid ${showPreviews ? C.accent : C.borderStrong}`, color: showPreviews ? C.accent : C.textFaint, background: 'transparent', fontFamily: 'inherit', cursor: 'pointer' }}
                     onClick={() => setShowPreviews(v => !v)}
                   >{showPreviews ? 'OCULTAR' : 'MOSTRAR'}</button>
                 </div>
                 {/* Per-face */}
                 {faces.map(face => (
-                  <div key={face.id} style={{ marginBottom: 20, paddingBottom: 20, borderBottom: '1px solid #1a1a1a' }}>
+                  <div key={face.id} style={{ marginBottom: 20, paddingBottom: 20, borderBottom: `1px solid ${C.bgMain}` }}>
                     {showPreviews && (
                       <canvas
                         ref={el => { if (el) previewCanvasesRef.current.set(face.id, el); else previewCanvasesRef.current.delete(face.id); }}
                         width={112} height={63}
-                        style={{ display: 'block', width: '50%', border: '1px solid #222', background: '#000', marginBottom: 6 }}
+                        style={{ display: 'block', width: '50%', border: `1px solid ${C.border}`, background: '#000', marginBottom: 6 }}
                       />
                     )}
                     <input
-                      style={{ width: '100%', fontSize: 10, background: 'transparent', border: 'none', borderBottom: '1px solid #222', color: '#666', fontFamily: 'inherit', padding: '2px 0', marginBottom: 6, outline: 'none' }}
+                      style={{ width: '100%', fontSize: 10, background: 'transparent', border: 'none', borderBottom: `1px solid ${C.border}`, color: C.textMuted, fontFamily: 'inherit', padding: '2px 0', marginBottom: 6, outline: 'none' }}
                       value={face.name} onChange={e => updateFace(face.id, { name: e.target.value })}
                     />
                     <select
-                      style={{ width: '100%', fontSize: 10, padding: '6px 8px', background: '#111', color: '#ccc', border: '2px solid #333', fontFamily: 'inherit' }}
+                      style={{ width: '100%', fontSize: 10, padding: '6px 8px', background: C.bgPanel, color: C.textSecondary, border: `2px solid ${C.borderStrong}`, fontFamily: 'inherit' }}
                       value={face.scene} onChange={e => updateFace(face.id, { scene: e.target.value as SceneType })}
                     >
                       {SCENE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
-                    {face.scene !== 'white' && face.scene !== 'camera' && (
-                      <div style={{ marginTop: 8, padding: '8px', border: '1px solid #1a1a1a' }}>
-                        <span style={{ fontSize: 9, color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Variación</span>
+                    {(face.scene === 'white' || face.scene === 'gradient' || face.scene === 'win98') && (
+                      <div style={{ marginTop: 8, padding: '8px', border: `1px solid ${C.bgMain}` }}>
+                        <span style={{ fontSize: 9, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Variación</span>
+                        {face.scene === 'white' && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                            <input type="color" value={face.params?.color || '#ffffff'} onChange={e => updateFace(face.id, { params: { ...face.params, color: e.target.value } })}
+                              style={{ width: 40, height: 24, cursor: 'pointer', border: `2px solid ${C.borderStrong}`, background: 'transparent' }} />
+                            <span style={{ fontSize: 9, color: C.textFaint }}>Color</span>
+                          </div>
+                        )}
                         {(face.scene === 'gradient' || face.scene === 'win98') && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-                            <span style={{ fontSize: 9, color: '#555' }}>Velocidad</span>
+                            <span style={{ fontSize: 9, color: C.textFaint }}>Velocidad</span>
                             <input type="range" min={0.1} max={3} step={0.1} value={face.params?.speed || 1}
                               onChange={e => updateFace(face.id, { params: { ...face.params, speed: +e.target.value } })}
                               style={{ flex: 1 }} />
@@ -1678,12 +1851,12 @@ export default function App() {
         <div ref={containerRef} style={{ flex: 1, position: 'relative', minWidth: 0 }} />
 
         {/* ── RIGHT: Controles (320px) ── */}
-        <div style={{ width: 320, borderLeft: '1px solid #222', overflowY: 'auto', flexShrink: 0 }} onPointerDown={e => e.stopPropagation()}>
+        <div style={{ width: 320, borderLeft: `1px solid ${C.border}`, overflowY: 'auto', flexShrink: 0 }} onPointerDown={e => e.stopPropagation()}>
 
           {/* LUCES */}
-          <div style={{ borderBottom: '1px solid #222' }}>
+          <div style={{ borderBottom: `1px solid ${C.border}` }}>
             <button
-              style={{ width: '100%', padding: '14px 16px', background: 'transparent', border: 'none', color: showLightPanel ? '#f5f5f5' : '#666', fontFamily: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between' }}
+              style={{ width: '100%', padding: '14px 16px', background: 'transparent', border: 'none', color: showLightPanel ? C.textPrimary : C.textMuted, fontFamily: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between' }}
               onClick={() => setShowLightPanel(v => !v)}
             >
               <span>LUCES</span>
@@ -1692,29 +1865,29 @@ export default function App() {
             {showLightPanel && (
               <div style={{ padding: '0 16px 16px' }}>
                 {/* Light Presets */}
-                <div style={{ marginBottom: 20, paddingBottom: 20, borderBottom: '1px solid #222' }}>
-                  <label style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 8 }}>Presets</label>
+                <div style={{ marginBottom: 20, paddingBottom: 20, borderBottom: `1px solid ${C.border}` }}>
+                  <label style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 8 }}>Presets</label>
                   <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                     <input type="text" placeholder="Nombre…" value={presetName}
                       onChange={e => setPresetName(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && savePreset()}
-                      style={{ flex: 1, fontSize: 10, background: '#0a0a0a', border: '2px solid #333', color: '#ccc', fontFamily: 'inherit', padding: '6px 8px' }}
+                      style={{ flex: 1, fontSize: 10, background: C.bgInput, border: `2px solid ${C.borderStrong}`, color: C.textSecondary, fontFamily: 'inherit', padding: '6px 8px' }}
                     />
                     <button
-                      style={{ background: '#00FF85', color: '#000', border: '2px solid #00FF85', padding: '6px 12px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }}
+                      style={{ background: C.accent, color: C.accentText, border: `2px solid ${C.accent}`, padding: '6px 12px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }}
                       onClick={savePreset}
                     >SAVE</button>
                   </div>
-                  {lightPresets.length === 0 && <p style={{ fontSize: 9, color: '#444', fontStyle: 'italic' }}>Sin presets guardados</p>}
+                  {lightPresets.length === 0 && <p style={{ fontSize: 9, color: C.textGhost, fontStyle: 'italic' }}>Sin presets guardados</p>}
                   <div style={{ maxHeight: 120, overflowY: 'auto' }}>
                     {lightPresets.map(p => (
                       <div key={p.name} style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
                         <button
-                          style={{ flex: 1, textAlign: 'left', fontSize: 9, padding: '6px 8px', background: '#111', color: '#aaa', border: '2px solid #222', fontFamily: 'inherit', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          style={{ flex: 1, textAlign: 'left', fontSize: 9, padding: '6px 8px', background: C.bgPanel, color: C.textTertiary, border: `2px solid ${C.border}`, fontFamily: 'inherit', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                           onClick={() => loadPreset(p)}
                         >▶ {p.name}</button>
                         <button
-                          style={{ fontSize: 9, padding: '6px 8px', background: 'transparent', color: '#ff4444', border: '2px solid #330000', fontFamily: 'inherit', cursor: 'pointer' }}
+                          style={{ fontSize: 9, padding: '6px 8px', background: 'transparent', color: C.danger, border: `2px solid ${C.dangerBorder}`, fontFamily: 'inherit', cursor: 'pointer' }}
                           onClick={() => deletePreset(p.name)}
                         >✕</button>
                       </div>
@@ -1726,27 +1899,27 @@ export default function App() {
                 <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
                   <button
                     style={lightsAllOff
-                      ? { flex: 1, background: '#ff3333', color: '#fff', border: '2px solid #ff3333', padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }
-                      : { flex: 1, background: 'transparent', color: '#555', border: '2px solid #333', padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }
+                      ? { flex: 1, background: '#ff3333', color: C.white, border: '2px solid #ff3333', padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }
+                      : { flex: 1, background: 'transparent', color: C.textFaint, border: `2px solid ${C.borderStrong}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }
                     }
                     onClick={() => setLightsAllOff(v => !v)}
                   >{lightsAllOff ? '🔴 OFF' : '⚡ ON'}</button>
                   <button
                     style={chaserActive
-                      ? { flex: 1, background: '#00FF85', color: '#000', border: '2px solid #00FF85', padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }
-                      : { flex: 1, background: 'transparent', color: '#555', border: '2px solid #333', padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }
+                      ? { flex: 1, background: C.accent, color: C.accentText, border: `2px solid ${C.accent}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }
+                      : { flex: 1, background: 'transparent', color: C.textFaint, border: `2px solid ${C.borderStrong}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }
                     }
                     onClick={() => setChaserActive(v => !v)}
                   >⚡ CHASE</button>
                 </div>
                 {chaserActive && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                    <span style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', minWidth: 32 }}>BPM</span>
+                    <span style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', minWidth: 32 }}>BPM</span>
                     <input type="range" min={30} max={300} step={1} value={chaserBpm}
                       onChange={e => setChaserBpm(+e.target.value)} style={{ flex: 1 }} />
                     <input type="number" min={30} max={300} value={chaserBpm}
                       onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setChaserBpm(Math.max(30, Math.min(300, v))); }}
-                      style={{ width: 48, fontSize: 9, background: '#0a0a0a', border: '2px solid #333', color: '#00FF85', fontFamily: 'monospace', padding: '4px' }} />
+                      style={{ width: 48, fontSize: 9, background: C.bgInput, border: `2px solid ${C.borderStrong}`, color: C.accent, fontFamily: 'monospace', padding: '4px' }} />
                   </div>
                 )}
 
@@ -1754,9 +1927,10 @@ export default function App() {
                 <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
                   {lights.map((l, i) => {
                     const typeEmoji = l.type === 'spot' ? '🔦' : '💡';
+                    const isActive = activeLightTab === i;
                     return (
                       <button key={i}
-                        style={{ flex: 1, fontSize: 10, padding: '6px 4px', background: l.color, color: '#000', fontWeight: 'bold', border: activeLightTab === i ? '2px solid #fff' : '2px solid transparent', opacity: lightsAllOff ? 0.2 : Math.max(0.35, Math.min(1, l.intensity / 4)), cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}
+                        style={{ flex: 1, fontSize: 10, padding: '6px 4px', background: 'transparent', color: isActive ? C.accent : C.textMuted, fontWeight: 'bold', border: isActive ? `2px solid ${C.accent}` : `2px solid ${C.borderStrong}`, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}
                         onClick={() => setActiveLightTab(i)}
                       >{typeEmoji} {l.name.split(' ')[1]}</button>
                     );
@@ -1770,7 +1944,7 @@ export default function App() {
                   const numInput = (val: number, min: number, max: number, step: number, key: string) => (
                     <input type="number" min={min} max={max} step={step} value={val}
                       onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updateLight(i, { [key]: Math.max(min, Math.min(max, v)) }); }}
-                      style={{ width: 52, fontSize: 9, background: '#0a0a0a', border: '2px solid #333', color: '#00FF85', fontFamily: 'monospace', padding: '3px 4px' }}
+                      style={{ width: 52, fontSize: 9, background: C.bgInput, border: `2px solid ${C.borderStrong}`, color: C.accent, fontFamily: 'monospace', padding: '3px 4px' }}
                     />
                   );
                   return (
@@ -1779,19 +1953,24 @@ export default function App() {
                         {(['point', 'spot', 'led'] as LightType[]).map(t => (
                           <button key={t}
                             style={l.type === t
-                              ? { flex: 1, fontSize: 9, padding: '8px 4px', background: '#f5f5f5', color: '#000', border: '2px solid #f5f5f5', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }
-                              : { flex: 1, fontSize: 9, padding: '8px 4px', background: 'transparent', color: '#666', border: '2px solid #333', cursor: 'pointer', fontFamily: 'inherit' }
+                              ? { flex: 1, fontSize: 9, padding: '8px 4px', background: C.textPrimary, color: C.accentText, border: `2px solid ${C.textPrimary}`, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }
+                              : { flex: 1, fontSize: 9, padding: '8px 4px', background: 'transparent', color: C.textMuted, border: `2px solid ${C.borderStrong}`, cursor: 'pointer', fontFamily: 'inherit' }
                             }
                             onClick={() => switchLightType(i, t)}>
                             {t === 'point' ? '💡 POINT' : t === 'spot' ? '🔦 SPOT' : '💡 LEDS'}
                           </button>
                         ))}
                       </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                        <input type="text" value={l.name} onChange={e => updateLight(i, { name: e.target.value })}
+                          placeholder="Nombre"
+                          style={{ flex: 1, fontSize: 10, background: C.bgInput, border: `2px solid ${C.borderStrong}`, color: C.textPrimary, fontFamily: 'monospace', padding: '4px 6px' }} />
+                      </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
                         <input type="color" value={l.color} onChange={e => updateLight(i, { color: e.target.value })}
-                          style={{ width: 40, height: 32, cursor: 'pointer', border: '2px solid #333', background: 'transparent' }} />
+                          style={{ width: 40, height: 32, cursor: 'pointer', border: `2px solid ${C.borderStrong}`, background: 'transparent' }} />
                         <div style={{ flex: 1 }}>
-                          <label style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 4 }}>Intensidad</label>
+                          <label style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 4 }}>Intensidad</label>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <input type="range" min={0} max={10} step={0.1} value={l.intensity}
                               onChange={e => updateLight(i, { intensity: +e.target.value })} style={{ flex: 1 }} />
@@ -1801,7 +1980,7 @@ export default function App() {
                       </div>
                       {l.type === 'led' && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                          <span style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', minWidth: 36 }}>LEDs</span>
+                          <span style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', minWidth: 36 }}>LEDs</span>
                           <input type="range" min={2} max={48} step={1} value={l.ledCount ?? 12}
                             onChange={e => { updateLight(i, { ledCount: +e.target.value }); switchLightType(i, 'led'); }} style={{ flex: 1 }} />
                           {numInput(l.ledCount ?? 12, 2, 48, 1, 'ledCount')}
@@ -1810,18 +1989,18 @@ export default function App() {
                       <div style={{ marginBottom: 16 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                           <div className={`toggle-switch ${l.strobe ? 'active' : ''}`} onClick={() => updateLight(i, { strobe: !l.strobe })} />
-                          <span style={{ fontSize: 11, color: '#999', textTransform: 'uppercase' }}>Strobe</span>
+                          <span style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase' }}>Strobe</span>
                         </div>
                         {l.strobe && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', minWidth: 24 }}>Hz</span>
+                            <span style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', minWidth: 24 }}>Hz</span>
                             <input type="range" min={0.5} max={20} step={0.5} value={l.strobeHz ?? 3}
                               onChange={e => updateLight(i, { strobeHz: +e.target.value })} style={{ flex: 1 }} />
                             {numInput(l.strobeHz ?? 3, 0.5, 20, 0.5, 'strobeHz')}
                           </div>
                         )}
                       </div>
-                      <p style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>Posición XYZ</p>
+                      <p style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>Posición XYZ</p>
                       {(['x', 'y', 'z'] as const).map(ax => (
                         <div key={ax} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                           <span style={{ fontSize: 11, fontWeight: 500, minWidth: 12, color: ax === 'x' ? '#f66' : ax === 'y' ? '#6f6' : '#66f' }}>{ax.toUpperCase()}</span>
@@ -1832,13 +2011,13 @@ export default function App() {
                       ))}
                       {(l.type === 'spot' || l.type === 'led') && (
                         <>
-                          <p style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8, marginTop: 12 }}>Rotación</p>
-                          {(['rotX', 'rotY'] as const).map(ax => (
+                          <p style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8, marginTop: 12 }}>Rotación</p>
+                          {(['rotX', 'rotZ'] as const).map(ax => (
                             <div key={ax} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                              <span style={{ fontSize: 9, color: '#999', minWidth: 32 }}>{ax === 'rotX' ? 'TILT' : 'PAN'}</span>
-                              <input type="range" min={-180} max={180} step={1} value={l[ax]}
+                              <span style={{ fontSize: 9, color: C.textLabel, minWidth: 32 }}>{ax === 'rotX' ? 'X' : 'Z'}</span>
+                              <input type="range" min={-180} max={180} step={1} value={l[ax] ?? 0}
                                 onChange={e => updateLight(i, { [ax]: +e.target.value })} style={{ flex: 1 }} />
-                              {numInput(l[ax], -180, 180, 1, ax)}
+                              {numInput(l[ax] ?? 0, -180, 180, 1, ax === 'rotZ' ? 'rotZ' : 'rotX')}
                             </div>
                           ))}
                         </>
@@ -1851,9 +2030,9 @@ export default function App() {
           </div>
 
           {/* ESTRUCTURA */}
-          <div style={{ borderBottom: '1px solid #222' }}>
+          <div style={{ borderBottom: `1px solid ${C.border}` }}>
             <button
-              style={{ width: '100%', padding: '14px 16px', background: 'transparent', border: 'none', color: showEstructuraPanel ? '#f5f5f5' : '#666', fontFamily: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between' }}
+              style={{ width: '100%', padding: '14px 16px', background: 'transparent', border: 'none', color: showEstructuraPanel ? C.textPrimary : C.textMuted, fontFamily: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between' }}
               onClick={() => setShowEstructuraPanel(v => !v)}
             >
               <span>ESTRUCTURA</span>
@@ -1861,39 +2040,59 @@ export default function App() {
             </button>
             {showEstructuraPanel && (
               <div style={{ padding: '0 16px 16px' }}>
-                <div style={{ marginBottom: 20, paddingBottom: 20, borderBottom: '1px solid #222' }}>
-                  <label style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 8 }}>Estilo Rig</label>
+                <div style={{ marginBottom: 20, paddingBottom: 20, borderBottom: `1px solid ${C.border}` }}>
+                  <label style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 8 }}>Estilo Rig</label>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button
                       style={rigStyle === 'pipe'
-                        ? { flex: 1, background: '#f5f5f5', color: '#000', border: '2px solid #f5f5f5', padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }
-                        : { flex: 1, background: 'transparent', color: '#666', border: '2px solid #333', padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }
+                        ? { flex: 1, background: C.textPrimary, color: C.accentText, border: `2px solid ${C.textPrimary}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }
+                        : { flex: 1, background: 'transparent', color: C.textMuted, border: `2px solid ${C.borderStrong}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }
                       }
                       onClick={() => setRigStyle('pipe')}
                     >⬜ PIPE</button>
                     <button
                       style={rigStyle === 'truss'
-                        ? { flex: 1, background: '#f5f5f5', color: '#000', border: '2px solid #f5f5f5', padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }
-                        : { flex: 1, background: 'transparent', color: '#666', border: '2px solid #333', padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }
+                        ? { flex: 1, background: C.textPrimary, color: C.accentText, border: `2px solid ${C.textPrimary}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }
+                        : { flex: 1, background: 'transparent', color: C.textMuted, border: `2px solid ${C.borderStrong}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }
                       }
                       onClick={() => setRigStyle('truss')}
                     >▦ TRUSS</button>
+                    <button
+                      style={rigStyle === 'columns'
+                        ? { flex: 1, background: C.textPrimary, color: C.accentText, border: `2px solid ${C.textPrimary}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 500 }
+                        : { flex: 1, background: 'transparent', color: C.textMuted, border: `2px solid ${C.borderStrong}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }
+                      }
+                      onClick={() => setRigStyle('columns')}
+                    >🏛️ COLUMNAS</button>
                   </div>
                 </div>
-                <label style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 12 }}>Dimensiones</label>
+
+                {/* People toggle */}
+                <div style={{ marginBottom: 20, paddingBottom: 20, borderBottom: `1px solid ${C.border}` }}>
+                  <label style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 8 }}>Personas (escala)</label>
+                  <button
+                    style={showPeople
+                      ? { width: '100%', background: 'transparent', color: C.accent, border: `2px solid ${C.accent}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', fontWeight: 600 }
+                      : { width: '100%', background: 'transparent', color: C.textMuted, border: `2px solid ${C.borderStrong}`, padding: '8px', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }
+                    }
+                    onClick={() => setShowPeople(v => !v)}
+                  >🧍 {showPeople ? 'OCULTAR PERSONAS' : 'MOSTRAR PERSONAS'}</button>
+                </div>
+
+                <label style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 12 }}>Dimensiones</label>
                 {(['w', 'h', 'd'] as const).map(dim => {
                   const dimLabels: Record<string, string> = { w: 'Ancho (W)', h: 'Alto (H)', d: 'Profundidad (D)' };
                   return (
                     <div key={dim} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                      <label style={{ fontSize: 9, color: '#666', textTransform: 'uppercase', minWidth: 88 }}>{dimLabels[dim]}</label>
+                      <label style={{ fontSize: 9, color: C.textMuted, textTransform: 'uppercase', minWidth: 88 }}>{dimLabels[dim]}</label>
                       <input type="number" min={0.5} max={50} step={0.1} value={cubeDims[dim]}
                         onChange={e => setCubeDims(prev => ({ ...prev, [dim]: Math.max(0.5, Math.min(50, +e.target.value || 0.5)) }))}
-                        style={{ flex: 1, fontSize: 10, background: '#0a0a0a', border: '2px solid #333', color: '#00FF85', fontFamily: 'monospace', padding: '4px 6px' }} />
-                      <span style={{ fontSize: 9, color: '#444' }}>m</span>
+                        style={{ flex: 1, fontSize: 10, background: C.bgInput, border: `2px solid ${C.borderStrong}`, color: C.accent, fontFamily: 'monospace', padding: '4px 6px' }} />
+                      <span style={{ fontSize: 9, color: C.textGhost }}>m</span>
                     </div>
                   );
                 })}
-                <div style={{ marginTop: 4, textAlign: 'center', fontSize: 9, color: '#555', fontFamily: 'monospace' }}>
+                <div style={{ marginTop: 4, textAlign: 'center', fontSize: 9, color: C.textFaint, fontFamily: 'monospace' }}>
                   {cubeDims.w.toFixed(1)} × {cubeDims.h.toFixed(1)} × {cubeDims.d.toFixed(1)} m
                 </div>
               </div>
@@ -1901,9 +2100,9 @@ export default function App() {
           </div>
 
           {/* RESOLUCIÓN */}
-          <div style={{ borderBottom: '1px solid #222' }}>
+          <div style={{ borderBottom: `1px solid ${C.border}` }}>
             <button
-              style={{ width: '100%', padding: '14px 16px', background: 'transparent', border: 'none', color: showResolucionPanel ? '#f5f5f5' : '#666', fontFamily: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between' }}
+              style={{ width: '100%', padding: '14px 16px', background: 'transparent', border: 'none', color: showResolucionPanel ? C.textPrimary : C.textMuted, fontFamily: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between' }}
               onClick={() => setShowResolucionPanel(v => !v)}
             >
               <span>RESOLUCIÓN</span>
@@ -1911,30 +2110,30 @@ export default function App() {
             </button>
             {showResolucionPanel && (
               <div style={{ padding: '0 16px 16px' }}>
-                <label style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 12 }}>Resolución por Cara</label>
+                <label style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 12 }}>Resolución por Cara</label>
                 {faces.map(face => (
                   <div key={face.id} style={{ marginBottom: 14 }}>
-                    <p style={{ fontSize: 9, color: '#666', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{face.name}</p>
+                    <p style={{ fontSize: 9, color: C.textMuted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{face.name}</p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 9, color: '#444' }}>W:</span>
+                      <span style={{ fontSize: 9, color: C.textGhost }}>W:</span>
                       <input type="number" min={64} max={2048} step={1} value={face.resolution.w}
                         onChange={e => { const v = Math.max(64, Math.min(2048, parseInt(e.target.value) || 64)); updateFace(face.id, { resolution: { ...face.resolution, w: v } }); }}
-                        style={{ width: 60, fontSize: 9, background: '#0a0a0a', border: '2px solid #333', color: '#00FF85', fontFamily: 'monospace', padding: '3px 4px' }} />
-                      <span style={{ fontSize: 9, color: '#444' }}>×</span>
-                      <span style={{ fontSize: 9, color: '#444' }}>H:</span>
+                        style={{ width: 60, fontSize: 9, background: C.bgInput, border: `2px solid ${C.borderStrong}`, color: C.accent, fontFamily: 'monospace', padding: '3px 4px' }} />
+                      <span style={{ fontSize: 9, color: C.textGhost }}>×</span>
+                      <span style={{ fontSize: 9, color: C.textGhost }}>H:</span>
                       <input type="number" min={64} max={2048} step={1} value={face.resolution.h}
                         onChange={e => { const v = Math.max(64, Math.min(2048, parseInt(e.target.value) || 64)); updateFace(face.id, { resolution: { ...face.resolution, h: v } }); }}
-                        style={{ width: 60, fontSize: 9, background: '#0a0a0a', border: '2px solid #333', color: '#00FF85', fontFamily: 'monospace', padding: '3px 4px' }} />
+                        style={{ width: 60, fontSize: 9, background: C.bgInput, border: `2px solid ${C.borderStrong}`, color: C.accent, fontFamily: 'monospace', padding: '3px 4px' }} />
                     </div>
                   </div>
                 ))}
-                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #222' }}>
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginBottom: 4 }}>
-                    <span style={{ color: '#555', textTransform: 'uppercase' }}>Total px</span>
-                    <span style={{ color: '#00FF85', fontFamily: 'monospace' }}>{totalPixels.toLocaleString()}</span>
+                    <span style={{ color: C.textFaint, textTransform: 'uppercase' }}>Total px</span>
+                    <span style={{ color: C.accent, fontFamily: 'monospace' }}>{totalPixels.toLocaleString()}</span>
                   </div>
-                  <div style={{ fontSize: 9, color: '#555', textTransform: 'uppercase', marginBottom: 4 }}>Res. entrada recomendada:</div>
-                  <div style={{ fontSize: 10, color: '#00FF85', fontFamily: 'monospace' }}>{recInputW} × {recInputH}</div>
+                  <div style={{ fontSize: 9, color: C.textFaint, textTransform: 'uppercase', marginBottom: 4 }}>Res. entrada recomendada:</div>
+                  <div style={{ fontSize: 10, color: C.accent, fontFamily: 'monospace' }}>{recInputW} × {recInputH}</div>
                 </div>
               </div>
             )}
@@ -1945,30 +2144,30 @@ export default function App() {
       </div>{/* end main row */}
 
       {/* ── PRESETS DE ESCENA ── */}
-      <div style={{ borderTop: '1px solid #222', padding: '16px 24px', flexShrink: 0 }}>
-        <p style={{ fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>PRESETS DE ESCENA</p>
+      <div style={{ borderTop: `1px solid ${C.border}`, padding: '16px 24px', flexShrink: 0 }}>
+        <p style={{ fontSize: 12, color: C.textSubtle, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>PRESETS DE ESCENA</p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
           {([
             { emoji: '🖼️', title: 'Default', desc: 'Pre grabada', scene: 'trailer' as SceneType, accent: '#0066ff' },
-            { emoji: '🎥', title: 'Camara Virtual', desc: 'Luces dinámicas y estrobos', scene: 'camera' as SceneType, accent: '#ff0066' },
+            { emoji: '🎥', title: 'Camara Virtual', desc: 'Luces dinámicas y estrobos', scene: 'camera' as SceneType, accent: C.variantAccent },
             { emoji: '🗂️', title: 'Grid', desc: 'Setup para eventos corporativos', scene: 'grid_img' as SceneType, accent: '#ff6600' },
-            { emoji: '🌈', title: 'Gradients', desc: 'Luces para pista de baile', scene: 'gradient' as SceneType, accent: '#00FF85' },
+            { emoji: '🌈', title: 'Gradients', desc: 'Luces para pista de baile', scene: 'gradient' as SceneType, accent: C.accent },
             { emoji: '🤖', title: 'Preset', desc: 'Crea tu propio preset', scene: 'win98' as SceneType | null, accent: '#888' },
             { emoji: '⬜', title: 'Blanco', desc: 'Iluminación teatral clásica', scene: 'white' as SceneType, accent: '#ffcc00' },
           ] as { emoji: string; title: string; desc: string; scene: SceneType | null; accent: string }[]).map((preset, idx) => (
             <button
               key={idx}
-              style={{ background: 'transparent', border: '2px solid #333', padding: '16px 8px', textAlign: 'center', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}
+              style={{ background: 'transparent', border: `2px solid ${C.borderStrong}`, padding: '16px 8px', textAlign: 'center', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}
               onMouseEnter={e => (e.currentTarget.style.borderColor = preset.accent)}
-              onMouseLeave={e => (e.currentTarget.style.borderColor = '#333')}
+              onMouseLeave={e => (e.currentTarget.style.borderColor = C.borderStrong)}
               onClick={() => {
                 if (preset.scene) setFaces(prev => prev.map(f => ({ ...f, scene: preset.scene! })));
                 else setShowMappingUI(true);
               }}
             >
               <span style={{ fontSize: 20 }}>{preset.emoji}</span>
-              <span style={{ fontSize: 10, fontWeight: 500, color: '#f5f5f5', letterSpacing: '0.05em', textTransform: 'uppercase' }}>{preset.title}</span>
-              <span style={{ fontSize: 8, color: '#666' }}>{preset.desc}</span>
+              <span style={{ fontSize: 10, fontWeight: 500, color: C.textPrimary, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{preset.title}</span>
+              <span style={{ fontSize: 8, color: C.textMuted }}>{preset.desc}</span>
             </button>
           ))}
         </div>
@@ -1977,11 +2176,11 @@ export default function App() {
       {/* ── MAPPING OVERLAY ── */}
       {showMappingUI && (
         <div
-          style={{ position: 'fixed', zIndex: 100, left: mappingPos.x, top: mappingPos.y, width: 860, height: 620, background: 'rgba(10,10,10,0.97)', border: '2px solid #333', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.9)', display: 'flex', flexDirection: 'column', pointerEvents: 'auto', userSelect: 'none' }}
+          style={{ position: 'fixed', zIndex: 100, left: mappingPos.x, top: mappingPos.y, width: 860, height: 620, background: C.bgOverlay, border: `2px solid ${C.borderStrong}`, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.9)', display: 'flex', flexDirection: 'column', pointerEvents: 'auto', userSelect: 'none' }}
           onPointerDown={e => e.stopPropagation()}
         >
           <div
-            style={{ padding: '12px 16px', borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'move', background: '#111', flexShrink: 0 }}
+            style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'move', background: C.bgPanel, flexShrink: 0 }}
             onPointerDown={e => {
               dragStartRef.current = { x: e.clientX, y: e.clientY, winX: mappingPos.x, winY: mappingPos.y };
               const move = (me: PointerEvent) => {
@@ -1993,38 +2192,38 @@ export default function App() {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ width: 8, height: 8, background: '#00FF85', display: 'inline-block' }} />
-              <h2 style={{ fontSize: 10, fontWeight: 400, color: '#888', letterSpacing: '0.2em', textTransform: 'uppercase' }}>CONFIGURAR MAPEITO . _.</h2>
+              <span style={{ width: 8, height: 8, background: C.accent, display: 'inline-block' }} />
+              <h2 style={{ fontSize: 10, fontWeight: 400, color: C.textSubtle, letterSpacing: '0.2em', textTransform: 'uppercase' }}>CONFIGURAR MAPEITO . _.</h2>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button style={{ padding: '6px 14px', background: 'transparent', color: '#888', border: '2px solid #333', fontSize: 10, fontFamily: 'inherit', letterSpacing: '0.1em', cursor: 'pointer', textTransform: 'uppercase' }} onClick={undo}>UNDO</button>
-              <button style={{ padding: '6px 14px', background: '#00FF85', color: '#000', border: '2px solid #00FF85', fontSize: 10, fontFamily: 'inherit', letterSpacing: '0.1em', cursor: 'pointer', fontWeight: 500, textTransform: 'uppercase' }} onClick={() => setShowMappingUI(false)}>CERRAR</button>
+              <button style={{ padding: '6px 14px', background: 'transparent', color: C.textSubtle, border: `2px solid ${C.borderStrong}`, fontSize: 10, fontFamily: 'inherit', letterSpacing: '0.1em', cursor: 'pointer', textTransform: 'uppercase' }} onClick={undo}>UNDO</button>
+              <button style={{ padding: '6px 14px', background: C.accent, color: C.accentText, border: `2px solid ${C.accent}`, fontSize: 10, fontFamily: 'inherit', letterSpacing: '0.1em', cursor: 'pointer', fontWeight: 500, textTransform: 'uppercase' }} onClick={() => setShowMappingUI(false)}>CERRAR</button>
             </div>
           </div>
 
           <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', padding: 16, gap: 12 }}>
-            <div style={{ background: '#0a0a0a', border: '1px solid #222', padding: 12, fontSize: 9, color: '#555', flexShrink: 0 }}>
+            <div style={{ background: C.bgInput, border: `1px solid ${C.border}`, padding: 12, fontSize: 9, color: C.textFaint, flexShrink: 0 }}>
               <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 6 }}>
-                <span>Dims: <span style={{ color: '#00FF85', fontFamily: 'monospace' }}>{cubeDims.w.toFixed(1)}×{cubeDims.h.toFixed(1)}×{cubeDims.d.toFixed(1)} m</span></span>
-                <span>Total px: <span style={{ color: '#00FF85', fontFamily: 'monospace' }}>{totalPixels.toLocaleString()}</span></span>
+                <span>Dims: <span style={{ color: C.accent, fontFamily: 'monospace' }}>{cubeDims.w.toFixed(1)}×{cubeDims.h.toFixed(1)}×{cubeDims.d.toFixed(1)} m</span></span>
+                <span>Total px: <span style={{ color: C.accent, fontFamily: 'monospace' }}>{totalPixels.toLocaleString()}</span></span>
               </div>
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                {faces.map(f => <span key={f.id} style={{ fontFamily: 'monospace' }}>{f.name}: <span style={{ color: '#888' }}>{f.resolution.w}×{f.resolution.h}</span></span>)}
+                {faces.map(f => <span key={f.id} style={{ fontFamily: 'monospace' }}>{f.name}: <span style={{ color: C.textSubtle }}>{f.resolution.w}×{f.resolution.h}</span></span>)}
               </div>
             </div>
 
             <div style={{ flexShrink: 0 }}>
               <button
-                style={{ padding: '6px 12px', background: 'transparent', color: '#ff4444', border: '2px solid #330000', fontSize: 9, fontFamily: 'inherit', cursor: 'pointer', textTransform: 'uppercase' }}
+                style={{ padding: '6px 12px', background: 'transparent', color: C.danger, border: `2px solid ${C.dangerBorder}`, fontSize: 9, fontFamily: 'inherit', cursor: 'pointer', textTransform: 'uppercase' }}
                 onClick={() => { if (confirm('¿Restablecer todo a fábrica?')) { localStorage.removeItem('stage_viz_config'); window.location.reload(); } }}
               >FACTORY RESET</button>
             </div>
 
-            <div ref={previewContainerRef} style={{ position: 'relative', background: '#000', border: '1px solid #222', overflow: 'hidden', height: 280, flexShrink: 0 }}>
+            <div ref={previewContainerRef} style={{ position: 'relative', background: '#000', border: `1px solid ${C.border}`, overflow: 'hidden', height: 280, flexShrink: 0 }}>
               <canvas ref={mappingPreviewCanvasRef} width={860} height={280} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
               <div style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
                 {(() => {
-                  const COLORS = ['#ff0066', '#00ff85', '#0066ff', '#ffff00'];
+                  const COLORS = [C.variantAccent, '#00ff85', '#0066ff', '#ffff00'];
                   const HANDLES: { key: string; style: React.CSSProperties }[] = [
                     { key: 'nw', style: { top: -5, left: -5, cursor: 'nwse-resize' } },
                     { key: 'n', style: { top: -5, left: 'calc(50% - 5px)', cursor: 'ns-resize' } },
@@ -2054,8 +2253,8 @@ export default function App() {
                         }}
                         onPointerUp={() => { faceDragRef.current = null; }}
                       >
-                        <div style={{ position: 'absolute', top: 0, left: 0, padding: '2px 4px', fontSize: 7, fontWeight: 'bold', textTransform: 'uppercase', background: color, color: '#000', pointerEvents: 'none' }}>{face.name}</div>
-                        <div style={{ position: 'absolute', bottom: 0, right: 0, padding: '2px 4px', fontSize: 7, fontWeight: 'bold', textTransform: 'uppercase', background: color + 'bb', color: '#000', pointerEvents: 'none' }}>{face.name}</div>
+                        <div style={{ position: 'absolute', top: 0, left: 0, padding: '2px 4px', fontSize: 7, fontWeight: 'bold', textTransform: 'uppercase', background: color, color: C.accentText, pointerEvents: 'none' }}>{face.name}</div>
+                        <div style={{ position: 'absolute', bottom: 0, right: 0, padding: '2px 4px', fontSize: 7, fontWeight: 'bold', textTransform: 'uppercase', background: color + 'bb', color: C.accentText, pointerEvents: 'none' }}>{face.name}</div>
                         {HANDLES.map(({ key, style }) => (
                           <div key={key} data-handle={key}
                             style={{ position: 'absolute', width: 10, height: 10, background: '#fff', border: `2px solid ${color}`, boxSizing: 'border-box', zIndex: 20, ...style }}
@@ -2089,14 +2288,14 @@ export default function App() {
             </div>
 
             {(() => {
-              const COLORS = ['#ff0066', '#00ff85', '#0066ff', '#ffff00'];
+              const COLORS = [C.variantAccent, '#00ff85', '#0066ff', '#ffff00'];
               return (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, background: '#0a0a0a', padding: 12, border: '1px solid #222', flexShrink: 0 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, background: C.bgInput, padding: 12, border: `1px solid ${C.border}`, flexShrink: 0 }}>
                   {faces.map((f, idx) => {
                     const color = COLORS[idx];
                     const row = (label: string, val: number, onChange: (v: number) => void, min = -1, max = 2) => (
                       <div key={label}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: '#444', textTransform: 'uppercase', marginBottom: 2 }}><span>{label}</span><span>{val.toFixed(3)}</span></div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: C.textGhost, textTransform: 'uppercase', marginBottom: 2 }}><span>{label}</span><span>{val.toFixed(3)}</span></div>
                         <input type="range" min={min} max={max} step={0.001} value={val} onChange={e => onChange(+e.target.value)} style={{ width: '100%' }} />
                       </div>
                     );
