@@ -735,9 +735,9 @@ export default function App() {
   });
 
   const [lights, setLights] = useState<LightConfig[]>([
-    { id: 0, name: 'LED A', color: '#ffffff', intensity: 2, strobe: false, strobeHz: 3, type: 'led', x: -1.70, y: 0, z:  1.70, rotX: 0, rotY: 0, rotZ: 0, ledCount: 12 },
-    { id: 1, name: 'LED B', color: '#ffffff', intensity: 2, strobe: false, strobeHz: 3, type: 'led', x:  1.70, y: 0, z:  1.70, rotX: 0, rotY: 0, rotZ: 0, ledCount: 12 },
-    { id: 2, name: 'LED C', color: '#ffffff', intensity: 2, strobe: false, strobeHz: 3, type: 'led', x:  1.70, y: 0, z: -1.70, rotX: 0, rotY: 0, rotZ: 0, ledCount: 12 },
+    { id: 0, name: 'LED A', color: '#ffffff', intensity: 2, strobe: false, strobeHz: 3, type: 'led', x: -1.70, y: 0, z: 1.70, rotX: 0, rotY: 0, rotZ: 0, ledCount: 12 },
+    { id: 1, name: 'LED B', color: '#ffffff', intensity: 2, strobe: false, strobeHz: 3, type: 'led', x: 1.70, y: 0, z: 1.70, rotX: 0, rotY: 0, rotZ: 0, ledCount: 12 },
+    { id: 2, name: 'LED C', color: '#ffffff', intensity: 2, strobe: false, strobeHz: 3, type: 'led', x: 1.70, y: 0, z: -1.70, rotX: 0, rotY: 0, rotZ: 0, ledCount: 12 },
     { id: 3, name: 'LED D', color: '#ffffff', intensity: 2, strobe: false, strobeHz: 3, type: 'led', x: -1.70, y: 0, z: -1.70, rotX: 0, rotY: 0, rotZ: 0, ledCount: 12 },
   ]);
 
@@ -1985,7 +1985,7 @@ export default function App() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', height: 52, borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
         <div>
           <h1 style={{ fontSize: 16, fontWeight: 500, letterSpacing: '0.2em', color: C.accent }}>INSIDE THE BOX</h1>
-          <p style={{ fontSize: 9, color: C.textGhost, letterSpacing: '0.1em' }}>By tomix_x</p>
+          <p style={{ fontSize: 9, color: C.textGhost, letterSpacing: '0.1em' }}>By Toni y Tomi ._. </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button
