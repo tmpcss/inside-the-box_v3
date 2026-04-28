@@ -948,7 +948,7 @@ export default function App() {
   const [cameraResolution, setCameraResolution] = useState({ w: 0, h: 0 });
   const [cameraScale, setCameraScale] = useState(1.0);
   const [showMappingUI, setShowMappingUI] = useState(false);
-  const [offFaceOpacity, setOffFaceOpacity] = useState(1.0);
+  const [offFaceOpacity, setOffFaceOpacity] = useState(0.9);
   const [ledCountGlobal] = useState(12);
   const [showFacePanel, setShowFacePanel] = useState(false);
   const [showLightPanel, setShowLightPanel] = useState(false);
@@ -1007,10 +1007,10 @@ export default function App() {
   });
 
   const [lights, setLights] = useState<LightConfig[]>([
-    { id: 0, name: 'LED A', color: '#ffffff', intensity: 2, strobe: false, strobeHz: 3, type: 'led', x: -1.70, y: 0, z: 1.70, rotX: 0, rotY: 0, rotZ: 0, ledCount: 12, spotDistance: 50 },
-    { id: 1, name: 'LED B', color: '#ffffff', intensity: 2, strobe: false, strobeHz: 3, type: 'led', x: 1.70, y: 0, z: 1.70, rotX: 0, rotY: 0, rotZ: 0, ledCount: 12, spotDistance: 50 },
-    { id: 2, name: 'LED C', color: '#ffffff', intensity: 2, strobe: false, strobeHz: 3, type: 'led', x: 1.70, y: 0, z: -1.70, rotX: 0, rotY: 0, rotZ: 0, ledCount: 12, spotDistance: 50 },
-    { id: 3, name: 'LED D', color: '#ffffff', intensity: 2, strobe: false, strobeHz: 3, type: 'led', x: -1.70, y: 0, z: -1.70, rotX: 0, rotY: 0, rotZ: 0, ledCount: 12, spotDistance: 50 },
+    { id: 0, name: 'LED A', color: '#ffffff', intensity: 4, strobe: false, strobeHz: 3, type: 'led', x: -1.7, y: 0, z: 1.7, rotX: 0, rotY: 0, rotZ: 0, ledCount: 12, spotDistance: 50 },
+    { id: 1, name: 'LED B', color: '#ffffff', intensity: 2, strobe: false, strobeHz: 3, type: 'led', x: 1.7, y: 0, z: 1.7, rotX: 0, rotY: 0, rotZ: 0, ledCount: 12, spotDistance: 50 },
+    { id: 2, name: 'LED C', color: '#ffffff', intensity: 2, strobe: false, strobeHz: 3, type: 'led', x: 1.7, y: 0, z: -1.7, rotX: 0, rotY: 0, rotZ: 0, ledCount: 12, spotDistance: 50 },
+    { id: 3, name: 'LED D', color: '#ffffff', intensity: 2, strobe: false, strobeHz: 3, type: 'led', x: -1.7, y: 0, z: -1.7, rotX: 0, rotY: 0, rotZ: 0, ledCount: 12, spotDistance: 50 },
   ]);
 
   // Keep refs in sync
@@ -1800,11 +1800,13 @@ export default function App() {
       const hasVote = voteOverlayActiveRef.current;
       const hasCd = countdownActiveRef.current;
       overlayFaceRef.current.forEach(ov => {
-        const { canvas, ctx, tex } = ov;
+        const { canvas, ctx, tex, mesh } = ov;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         if (hasVote) drawVoteFaceOverlay(ctx, canvas, voteOverlayParamsRef.current);
         if (hasCd) drawCountdownFaceOverlay(ctx, canvas, cdFmt);
         tex.needsUpdate = true;
+        // Track master projection opacity
+        (mesh.material as THREE.MeshBasicMaterial).opacity = offFaceOpacityRef.current;
       });
 
       renderer.render(scene, cam);
@@ -2322,6 +2324,28 @@ export default function App() {
   const updateFace = (id: number, patch: Partial<FaceConfig>) =>
     setFaces(prev => prev.map(f => f.id === id ? { ...f, ...patch } : f));
 
+  // --- Auto-load presets_luces.json and apply "tiras en las esquinas" ---
+  useEffect(() => {
+    fetch('/presets_luces.json')
+      .then(r => r.json())
+      .then((json: LightPreset[]) => {
+        if (!Array.isArray(json)) return;
+        setLightPresets(prev => {
+          const merged = [...prev];
+          json.forEach(p => { if (p.name && Array.isArray(p.lights) && !merged.find(m => m.name === p.name)) merged.push(p); });
+          localStorage.setItem('stage_viz_light_presets', JSON.stringify(merged));
+          return merged;
+        });
+        // Apply "tiras en las esquinas" as initial lights if no saved config
+        const hasSaved = !!localStorage.getItem('stage_viz_config');
+        if (!hasSaved) {
+          const preset = json.find(p => p.name === 'tiras en las esquinas');
+          if (preset) setLights(preset.lights);
+        }
+      })
+      .catch(() => { /* JSON not found — use defaults */ });
+  }, []); // eslint-disable-line
+
   // --- PERSISTENCE: Load/Save Effects ---
   useEffect(() => {
     const saved = localStorage.getItem('stage_viz_config');
@@ -2418,6 +2442,16 @@ export default function App() {
         {/* ── LEFT OVERLAY PANEL ── */}
         <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: leftOpen ? 300 : 0, overflow: 'hidden', transition: 'width 0.22s ease', zIndex: 10, background: C.bgPanel + 'f0', borderRight: `1px solid ${C.border}`, backdropFilter: 'blur(2px)' }} onPointerDown={e => e.stopPropagation()}>
           <div style={{ width: 300, overflowY: 'auto', height: '100%' }}>
+            {/* MASTER PROJECTION — fijo arriba, fuera de cualquier sección */}
+            <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.borderStrong}`, background: C.bgCard }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontSize: 10, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Master Projection</span>
+                <span style={{ fontSize: 11, color: C.accent, fontFamily: 'monospace', fontWeight: 600 }}>{(offFaceOpacity * 100).toFixed(0)}%</span>
+              </div>
+              <input type="range" min="0" max="1" step="0.01" value={offFaceOpacity}
+                onChange={e => setOffFaceOpacity(parseFloat(e.target.value))} style={{ width: '100%' }} />
+            </div>
+
             {/* PANEL: Cámara Virtual */}
             <div style={{ borderBottom: `1px solid ${C.border}` }}>
               <button
@@ -2472,15 +2506,6 @@ export default function App() {
               </button>
               {showFacePanel && (
                 <div style={{ padding: '0 16px 16px' }}>
-                  {/* Master Projection */}
-                  <div style={{ marginBottom: 20, paddingBottom: 20, borderBottom: `1px solid ${C.border}` }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <span style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Master Projection</span>
-                      <span style={{ fontSize: 11, color: C.textSecondary, fontFamily: 'monospace' }}>{(offFaceOpacity * 100).toFixed(0)}%</span>
-                    </div>
-                    <input type="range" min="0" max="1" step="0.01" value={offFaceOpacity}
-                      onChange={e => setOffFaceOpacity(parseFloat(e.target.value))} style={{ width: '100%' }} />
-                  </div>
                   {/* Sync */}
                   <div style={{ marginBottom: 20, paddingBottom: 20, borderBottom: `1px solid ${C.border}` }}>
                     <label style={{ fontSize: 11, color: C.textLabel, textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 8 }}>Sync a todas</label>
