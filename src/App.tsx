@@ -734,14 +734,14 @@ function drawVote(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, para
   }
 }
 
-function drawVoteFaceOverlay(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, params?: any) {
+function drawVoteFaceOverlay(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, params?: any, scale = 1.0) {
   const W = canvas.width, H = canvas.height;
   const phrase = params?.phrase ?? '¿Siguiente escena?';
   const optA = params?.optA ?? 'Win 98';
   const optB = params?.optB ?? 'Gradient';
 
-  // Box is 55% of canvas, centered
-  const bW = W * 0.55, bH = H * 0.55;
+  // Box is 55% of canvas * scale, centered
+  const bW = W * 0.55 * scale, bH = H * 0.55 * scale;
   const oX = (W - bW) / 2, oY = (H - bH) / 2;
   const S = bW / 280;
 
@@ -797,11 +797,9 @@ function drawVoteFaceOverlay(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasEl
   drawOpt(oX + bW / 2 + gap / 2, optB);
 }
 
-function drawCountdownFaceOverlay(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, fmt: string) {
+function drawCountdownFaceOverlay(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, fmt: string, scale = 1.0) {
   const W = canvas.width;
-  // No background box — just text floating near the top
-  // Canvas is 512px; "50px from top" → offset the text baseline ~50+fontSize pixels
-  const ts = Math.round(W * 0.062); // ~32px on 512 canvas — half of original ~62px
+  const ts = Math.round(W * 0.062 * scale);
   ctx.font = `100 ${ts}px "Courier New",monospace`;
   ctx.fillStyle = 'rgba(255,255,255,0.92)';
   ctx.textAlign = 'center';
@@ -937,8 +935,13 @@ export default function App() {
   const [voteOverlayOptA, setVoteOverlayOptA] = useState('Win 98');
   const [voteOverlayOptB, setVoteOverlayOptB] = useState('Gradient');
   const [voteOverlayStyle] = useState(0);
-  const [showVoteTimerPanel, setShowVoteTimerPanel] = useState(false);
+  const [voteOverlayScale, setVoteOverlayScale] = useState(1.0);
+  const [showVotePanel, setShowVotePanel] = useState(false);
+  const [showTimerPanel, setShowTimerPanel] = useState(false);
+  const [countdownScale, setCountdownScale] = useState(1.0);
   const voteOverlayActiveRef = useRef(false);
+  const voteOverlayScaleRef = useRef(1.0);
+  const countdownScaleRef = useRef(1.0);
   const voteOverlayParamsRef = useRef<any>({ phrase: '¿Siguiente escena?', optA: 'Win 98', optB: 'Gradient', voteStyle: 0 });
 
   const autoOrbitSpeedRef = useRef(2.0);
@@ -1021,6 +1024,8 @@ export default function App() {
   useEffect(() => { countdownSecondsRef.current = countdownSeconds; }, [countdownSeconds]);
   useEffect(() => { countdownStyleRef.current = countdownStyle; }, [countdownStyle]);
   useEffect(() => { voteOverlayActiveRef.current = voteOverlayActive; }, [voteOverlayActive]);
+  useEffect(() => { voteOverlayScaleRef.current = voteOverlayScale; }, [voteOverlayScale]);
+  useEffect(() => { countdownScaleRef.current = countdownScale; }, [countdownScale]);
   useEffect(() => {
     voteOverlayParamsRef.current = { phrase: voteOverlayPhrase, optA: voteOverlayOptA, optB: voteOverlayOptB, voteStyle: voteOverlayStyle };
   }, [voteOverlayPhrase, voteOverlayOptA, voteOverlayOptB, voteOverlayStyle]);
@@ -1802,8 +1807,8 @@ export default function App() {
       overlayFaceRef.current.forEach(ov => {
         const { canvas, ctx, tex, mesh } = ov;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (hasVote) drawVoteFaceOverlay(ctx, canvas, voteOverlayParamsRef.current);
-        if (hasCd) drawCountdownFaceOverlay(ctx, canvas, cdFmt);
+        if (hasVote) drawVoteFaceOverlay(ctx, canvas, voteOverlayParamsRef.current, voteOverlayScaleRef.current);
+        if (hasCd) drawCountdownFaceOverlay(ctx, canvas, cdFmt, countdownScaleRef.current);
         tex.needsUpdate = true;
         // Track master projection opacity
         (mesh.material as THREE.MeshBasicMaterial).opacity = offFaceOpacityRef.current;
@@ -2576,83 +2581,109 @@ export default function App() {
               )}
             </div>
 
-            {/* PANEL: Vote & Timer */}
+            {/* PANEL: Votación */}
             <div style={{ borderBottom: `1px solid ${C.border}` }}>
               <button
-                style={{ width: '100%', padding: '14px 16px', background: 'transparent', border: 'none', color: showVoteTimerPanel ? C.textPrimary : C.textMuted, fontFamily: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between' }}
-                onClick={() => setShowVoteTimerPanel(v => !v)}
+                style={{ width: '100%', padding: '14px 16px', background: 'transparent', border: 'none', color: showVotePanel ? C.textPrimary : C.textMuted, fontFamily: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                onClick={() => setShowVotePanel(v => !v)}
               >
-                <span>🗳 VOTE & TIMER</span>
-                <span>{showVoteTimerPanel ? '▼' : '▶'}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span>🗳 VOTACIÓN</span>
+                  {voteOverlayActive && <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.accent, display: 'inline-block' }} />}
+                </span>
+                <span>{showVotePanel ? '▼' : '▶'}</span>
               </button>
-              {showVoteTimerPanel && (
+              {showVotePanel && (
                 <div style={{ padding: '0 16px 16px' }}>
-
-                  {/* ── VOTE OVERLAY ── */}
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 9, color: C.textGhost, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8, borderBottom: `1px solid ${C.border}`, paddingBottom: 6 }}>Votación en cubo</div>
-                    <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                      <button
-                        style={{ flex: 1, fontSize: 9, padding: '6px', background: voteOverlayActive ? C.accent : 'transparent', color: voteOverlayActive ? '#fff' : C.textMuted, border: `1px solid ${voteOverlayActive ? C.accent : C.border}`, fontFamily: 'inherit', cursor: 'pointer' }}
-                        onClick={() => setVoteOverlayActive(v => !v)}>
-                        {voteOverlayActive ? '◉ VISIBLE' : '○ OCULTO'}
-                      </button>
-                    </div>
-                    <div style={{ marginBottom: 6 }}>
-                      <span style={{ fontSize: 8, color: C.textGhost, textTransform: 'uppercase', display: 'block', marginBottom: 3 }}>Pregunta</span>
-                      <input type="text" value={voteOverlayPhrase}
-                        onChange={e => setVoteOverlayPhrase(e.target.value)}
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                    <button
+                      style={{ flex: 1, fontSize: 9, padding: '6px', background: voteOverlayActive ? C.accent : 'transparent', color: voteOverlayActive ? '#fff' : C.textMuted, border: `1px solid ${voteOverlayActive ? C.accent : C.border}`, fontFamily: 'inherit', cursor: 'pointer' }}
+                      onClick={() => setVoteOverlayActive(v => !v)}>
+                      {voteOverlayActive ? '◉ VISIBLE' : '○ OCULTO'}
+                    </button>
+                  </div>
+                  <div style={{ marginBottom: 6 }}>
+                    <span style={{ fontSize: 8, color: C.textGhost, textTransform: 'uppercase', display: 'block', marginBottom: 3 }}>Pregunta</span>
+                    <input type="text" value={voteOverlayPhrase}
+                      onChange={e => setVoteOverlayPhrase(e.target.value)}
+                      style={{ width: '100%', fontSize: 10, background: C.bgInput, border: `1px solid ${C.borderStrong}`, color: C.textPrimary, fontFamily: 'inherit', padding: '4px 6px', boxSizing: 'border-box' }} />
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontSize: 8, color: C.textGhost, textTransform: 'uppercase', display: 'block', marginBottom: 3 }}>Opción A</span>
+                      <input type="text" value={voteOverlayOptA}
+                        onChange={e => setVoteOverlayOptA(e.target.value)}
                         style={{ width: '100%', fontSize: 10, background: C.bgInput, border: `1px solid ${C.borderStrong}`, color: C.textPrimary, fontFamily: 'inherit', padding: '4px 6px', boxSizing: 'border-box' }} />
                     </div>
-                    <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                      <div style={{ flex: 1 }}>
-                        <span style={{ fontSize: 8, color: C.textGhost, textTransform: 'uppercase', display: 'block', marginBottom: 3 }}>Opción A</span>
-                        <input type="text" value={voteOverlayOptA}
-                          onChange={e => setVoteOverlayOptA(e.target.value)}
-                          style={{ width: '100%', fontSize: 10, background: C.bgInput, border: `1px solid ${C.borderStrong}`, color: C.textPrimary, fontFamily: 'inherit', padding: '4px 6px', boxSizing: 'border-box' }} />
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <span style={{ fontSize: 8, color: C.textGhost, textTransform: 'uppercase', display: 'block', marginBottom: 3 }}>Opción B</span>
-                        <input type="text" value={voteOverlayOptB}
-                          onChange={e => setVoteOverlayOptB(e.target.value)}
-                          style={{ width: '100%', fontSize: 10, background: C.bgInput, border: `1px solid ${C.borderStrong}`, color: C.textPrimary, fontFamily: 'inherit', padding: '4px 6px', boxSizing: 'border-box' }} />
-                      </div>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontSize: 8, color: C.textGhost, textTransform: 'uppercase', display: 'block', marginBottom: 3 }}>Opción B</span>
+                      <input type="text" value={voteOverlayOptB}
+                        onChange={e => setVoteOverlayOptB(e.target.value)}
+                        style={{ width: '100%', fontSize: 10, background: C.bgInput, border: `1px solid ${C.borderStrong}`, color: C.textPrimary, fontFamily: 'inherit', padding: '4px 6px', boxSizing: 'border-box' }} />
                     </div>
                   </div>
-
-                  {/* ── COUNTDOWN OVERLAY ── */}
                   <div>
-                    <div style={{ fontSize: 9, color: C.textGhost, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8, borderBottom: `1px solid ${C.border}`, paddingBottom: 6 }}>Timer en cubo</div>
-                    <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                      <button style={{ flex: 1, fontSize: 9, padding: '6px', background: countdownActive ? C.accent : 'transparent', color: countdownActive ? '#fff' : C.textMuted, border: `1px solid ${countdownActive ? C.accent : C.border}`, fontFamily: 'inherit', cursor: 'pointer' }}
-                        onClick={() => setCountdownActive(v => !v)}>
-                        {countdownActive ? '◉ VISIBLE' : '○ OCULTO'}
-                      </button>
-                      <button style={{ flex: 1, fontSize: 9, padding: '6px', background: countdownRunning ? 'rgba(255,80,80,0.15)' : 'transparent', color: countdownRunning ? '#ff5555' : C.textMuted, border: `1px solid ${countdownRunning ? '#ff5555' : C.border}`, fontFamily: 'inherit', cursor: 'pointer' }}
-                        onClick={() => setCountdownRunning(v => !v)}>
-                        {countdownRunning ? '⏸ PAUSAR' : '▶ INICIAR'}
-                      </button>
-                      <button style={{ fontSize: 9, padding: '6px 8px', background: 'transparent', color: C.textGhost, border: `1px solid ${C.border}`, fontFamily: 'inherit', cursor: 'pointer' }}
-                        onClick={() => { setCountdownRunning(false); setCountdownSeconds(parseCountdownStr(countdownStartStr)); }}>
-                        ↺
-                      </button>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontSize: 8, color: C.textGhost, textTransform: 'uppercase' }}>Escala</span>
+                      <span style={{ fontSize: 9, color: C.accent, fontFamily: 'monospace' }}>{(voteOverlayScale * 100).toFixed(0)}%</span>
                     </div>
-                    <div style={{ textAlign: 'center', fontFamily: 'monospace', fontSize: 22, color: C.accent, letterSpacing: '0.1em', marginBottom: 8, padding: '6px 0', borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}` }}>
-                      {formatCountdown(countdownSeconds)}
-                    </div>
-                    <div style={{ marginBottom: 8 }}>
-                      <label style={{ fontSize: 8, color: C.textGhost, textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Tiempo inicial (HH:MM:SS)</label>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <input type="text" value={countdownStartStr}
-                          onChange={e => setCountdownStartStr(e.target.value)}
-                          placeholder="11:59:59"
-                          style={{ flex: 1, fontSize: 11, fontFamily: 'monospace', background: C.bgInput, border: `1px solid ${C.borderStrong}`, color: C.accent, padding: '5px 8px', letterSpacing: '0.1em' }} />
-                        <button style={{ fontSize: 9, padding: '5px 10px', background: 'transparent', color: C.textGhost, border: `1px solid ${C.border}`, fontFamily: 'inherit', cursor: 'pointer' }}
-                          onClick={() => { const s = parseCountdownStr(countdownStartStr); setCountdownSeconds(s); setCountdownRunning(false); }}>SET</button>
-                      </div>
+                    <input type="range" min="0.3" max="2.0" step="0.05" value={voteOverlayScale}
+                      onChange={e => setVoteOverlayScale(+e.target.value)} style={{ width: '100%' }} />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* PANEL: Timer */}
+            <div style={{ borderBottom: `1px solid ${C.border}` }}>
+              <button
+                style={{ width: '100%', padding: '14px 16px', background: 'transparent', border: 'none', color: showTimerPanel ? C.textPrimary : C.textMuted, fontFamily: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                onClick={() => setShowTimerPanel(v => !v)}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span>⏱ TIMER</span>
+                  {countdownActive && <span style={{ width: 6, height: 6, borderRadius: '50%', background: countdownRunning ? '#ff5555' : C.accent, display: 'inline-block' }} />}
+                </span>
+                <span>{showTimerPanel ? '▼' : '▶'}</span>
+              </button>
+              {showTimerPanel && (
+                <div style={{ padding: '0 16px 16px' }}>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                    <button style={{ flex: 1, fontSize: 9, padding: '6px', background: countdownActive ? C.accent : 'transparent', color: countdownActive ? '#fff' : C.textMuted, border: `1px solid ${countdownActive ? C.accent : C.border}`, fontFamily: 'inherit', cursor: 'pointer' }}
+                      onClick={() => setCountdownActive(v => !v)}>
+                      {countdownActive ? '◉ VISIBLE' : '○ OCULTO'}
+                    </button>
+                    <button style={{ flex: 1, fontSize: 9, padding: '6px', background: countdownRunning ? 'rgba(255,80,80,0.15)' : 'transparent', color: countdownRunning ? '#ff5555' : C.textMuted, border: `1px solid ${countdownRunning ? '#ff5555' : C.border}`, fontFamily: 'inherit', cursor: 'pointer' }}
+                      onClick={() => setCountdownRunning(v => !v)}>
+                      {countdownRunning ? '⏸ PAUSAR' : '▶ INICIAR'}
+                    </button>
+                    <button style={{ fontSize: 9, padding: '6px 8px', background: 'transparent', color: C.textGhost, border: `1px solid ${C.border}`, fontFamily: 'inherit', cursor: 'pointer' }}
+                      onClick={() => { setCountdownRunning(false); setCountdownSeconds(parseCountdownStr(countdownStartStr)); }}>
+                      ↺
+                    </button>
+                  </div>
+                  <div style={{ textAlign: 'center', fontFamily: 'monospace', fontSize: 22, color: C.accent, letterSpacing: '0.1em', marginBottom: 8, padding: '6px 0', borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}` }}>
+                    {formatCountdown(countdownSeconds)}
+                  </div>
+                  <div style={{ marginBottom: 10 }}>
+                    <label style={{ fontSize: 8, color: C.textGhost, textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Tiempo inicial (HH:MM:SS)</label>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input type="text" value={countdownStartStr}
+                        onChange={e => setCountdownStartStr(e.target.value)}
+                        placeholder="11:59:59"
+                        style={{ flex: 1, fontSize: 11, fontFamily: 'monospace', background: C.bgInput, border: `1px solid ${C.borderStrong}`, color: C.accent, padding: '5px 8px', letterSpacing: '0.1em' }} />
+                      <button style={{ fontSize: 9, padding: '5px 10px', background: 'transparent', color: C.textGhost, border: `1px solid ${C.border}`, fontFamily: 'inherit', cursor: 'pointer' }}
+                        onClick={() => { const s = parseCountdownStr(countdownStartStr); setCountdownSeconds(s); setCountdownRunning(false); }}>SET</button>
                     </div>
                   </div>
-
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontSize: 8, color: C.textGhost, textTransform: 'uppercase' }}>Escala</span>
+                      <span style={{ fontSize: 9, color: C.accent, fontFamily: 'monospace' }}>{(countdownScale * 100).toFixed(0)}%</span>
+                    </div>
+                    <input type="range" min="0.3" max="3.0" step="0.05" value={countdownScale}
+                      onChange={e => setCountdownScale(+e.target.value)} style={{ width: '100%' }} />
+                  </div>
                 </div>
               )}
             </div>
@@ -3085,7 +3116,6 @@ export default function App() {
               { emoji: '🌈', title: 'Gradients', scene: 'gradient' as SceneType, accent: C.accent },
               { emoji: '🖥️', title: 'Glitch', scene: 'win98' as SceneType | null, accent: '#888' },
               { emoji: '⬜', title: 'Blanco', scene: 'white' as SceneType, accent: '#ffcc00' },
-              { emoji: '🗳️', title: 'Votación', scene: 'vote' as SceneType, accent: '#7c4dff' },
             ] as { emoji: string; title: string; scene: SceneType | null; accent: string }[]).map((preset, idx) => (
               <button
                 key={idx}
